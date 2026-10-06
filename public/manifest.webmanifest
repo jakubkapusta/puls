@@ -1,0 +1,17 @@
+{
+  "name": "Puls",
+  "short_name": "Puls",
+  "description": "Breakout, w którym każdy klocek jest nutą, a utwór powstaje z tego, jak grasz.",
+  "lang": "pl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0d0618",
+  "theme_color": "#0d0618",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
