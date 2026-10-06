@@ -39,9 +39,13 @@ const HEAT: RGB[] = [
   [2.6, 1.2, 1.9],
 ];
 
+/** the palette of the current album: 0 synthwave, 1 lo-fi */
+let paletteLofi = false;
 export function rowColor(k: number): RGB {
-  // bottom rows cyan, through violet, top rows hot pink
-  const a: RGB = [0.15, 0.85, 1.25], b: RGB = [0.75, 0.35, 1.35], c: RGB = [1.4, 0.25, 0.75];
+  // synthwave: bottom rows cyan, through violet, top rows hot pink; lo-fi: teal, amber, rose
+  const a: RGB = paletteLofi ? [0.3, 0.8, 0.8] : [0.15, 0.85, 1.25];
+  const b: RGB = paletteLofi ? [1.25, 0.8, 0.4] : [0.75, 0.35, 1.35];
+  const c: RGB = paletteLofi ? [1.2, 0.42, 0.5] : [1.4, 0.25, 0.75];
   const m = (x: RGB, y: RGB, t: number): RGB => [lerp(x[0], y[0], t), lerp(x[1], y[1], t), lerp(x[2], y[2], t)];
   return k < 0.5 ? m(a, b, k * 2) : m(b, c, (k - 0.5) * 2);
 }
@@ -176,6 +180,10 @@ export class Renderer {
     return this.s * (this.canvas.clientWidth || window.innerWidth) / this.W;
   }
 
+  shakeBy(px: number) {
+    this.shake = Math.max(this.shake, px);
+  }
+
   /** forget the effects of a finished game */
   clear() {
     this.sparks.length = 0;
@@ -195,7 +203,7 @@ export class Renderer {
     switch (e.type) {
       case 'brick': {
         const b = e.brick;
-        const c = b.kind === 'hard' ? HARD : rowColor(b.rowUp / Math.max(1, g.song.rows.length - 1));
+        const c = b.kind === 'hard' ? HARD : rowColor(b.rowUp / Math.max(1, g.rowCount - 1));
         if (e.broken) {
           this.shatter(b.x, b.y, b.w, b.h, c, e.x, e.y, e.heat);
           if (e.heat >= 3) this.shock(b.x, b.y, 0.25 + e.heat * 0.05);
@@ -227,8 +235,7 @@ export class Renderer {
         this.sparkBurst(e.x, e.y, [0.6, 0.4, 1.4], 4, 160);
         break;
       case 'row': {
-        const y = BAL.field.bricksTop - BAL.field.brickH / 2 - e.row * BAL.field.rowPitch;
-        this.sweeps.push({ y, t0: t, c: rowColor((g.song.rows.length - 1 - e.row) / Math.max(1, g.song.rows.length - 1)) });
+        this.sweeps.push({ y: e.y, t0: t, c: rowColor(0.5 + 0.5 * Math.sin(e.row)) });
         this.flash = Math.max(this.flash, 0.04);
         break;
       }
@@ -241,7 +248,7 @@ export class Renderer {
         break;
       case 'special': {
         const b = e.brick;
-        const c = rowColor(b.rowUp / Math.max(1, g.song.rows.length - 1));
+        const c = rowColor(b.rowUp / Math.max(1, g.rowCount - 1));
         if (e.special === 'chord') for (let k = 0; k < 3; k++) this.rings.push({ x: b.x, y: b.y, t0: t + k * 0.06, dur: 0.6, r0: 20, r1: 120 + k * 40, c, thick: 2, a: 0.8 });
         if (e.special === 'echo') for (let k = 0; k < 3; k++) this.rings.push({ x: b.x, y: b.y, t0: t + k * 0.15, dur: 0.7, r0: 20, r1: 160, c: [0.8, 0.9, 1.6], thick: 1.5, a: 0.7 });
         if (e.special === 'tempoUp' || e.special === 'tempoDown') this.sweeps.push({ y: b.y, t0: t, c: [1.4, 1.2, 0.5] });
@@ -328,7 +335,13 @@ export class Renderer {
   }
 
   // ------------------------------------------------------------ frame
-  render(g: Game | null, beat: Beat, showLanding: boolean) {
+  /** the album's look (0 synthwave, 1 lo-fi), eased between songs */
+  private theme = 0;
+  /** the replay has no game: it tells how many layers play */
+  layersOverride: { n: number; ids: LayerId[] } | null = null;
+
+  render(g: Game | null, beat: Beat, showLanding: boolean, lofi = false) {
+    paletteLofi = lofi;
     const gl = this.gl;
     const now = performance.now() / 1000;
     const rdt = clamp(now - this.lastT, 0, 0.1);
@@ -338,7 +351,9 @@ export class Renderer {
 
     // layers fade in and out
     for (let i = 0; i < LAYER_IDS.length; i++) {
-      const on = g ? g.layers > g.song.layers.indexOf(LAYER_IDS[i]) && g.song.layers.includes(LAYER_IDS[i]) : false;
+      const lo = this.layersOverride;
+      const on = g ? g.layers > g.song.layers.indexOf(LAYER_IDS[i]) && g.song.layers.includes(LAYER_IDS[i])
+        : lo ? lo.n > lo.ids.indexOf(LAYER_IDS[i]) && lo.ids.includes(LAYER_IDS[i]) : false;
       this.lay[i] += ((on ? 1 : 0) - this.lay[i]) * damp(1.5, rdt);
     }
     gl.bindTexture(gl.TEXTURE_2D, this.specTex);
@@ -355,7 +370,8 @@ export class Renderer {
       .f1('u_bass', beat.bass).f1('u_mid', beat.mid).f1('u_high', beat.high).f1('u_energy', beat.energy).f1('u_groove', beat.groove)
       .f4('u_layA', this.lay[0], this.lay[1], this.lay[2], this.lay[3]).f2('u_layB', this.lay[4], this.lay[5])
       .tex('u_spec', 0, this.specTex)
-      .f4('u_field', this.x0, this.y0, this.x0 + FIELD_W * this.s, this.y0 + FIELD_H * this.s).f1('u_hz', hz).f1('u_detail', this.quality);
+      .f4('u_field', this.x0, this.y0, this.x0 + FIELD_W * this.s, this.y0 + FIELD_H * this.s).f1('u_hz', hz).f1('u_detail', this.quality)
+      .f1('u_theme', lofi ? 1 : 0);
     this.fullscreen();
 
     // shapes
@@ -375,6 +391,7 @@ export class Renderer {
       gl.disable(gl.BLEND);
     }
 
+    this.theme += ((lofi ? 1 : 0) - this.theme) * damp(3, rdt);
     this.flash *= Math.exp(-rdt * 12);
     this.dim *= Math.exp(-rdt * 0.9);
     this.tint *= Math.exp(-rdt * 3);
@@ -398,7 +415,15 @@ export class Renderer {
     const t = g.t;
     const gdt = clamp(t - this.gameT, 0, 0.1);
     this.gameT = t;
-    const nRows = Math.max(1, g.song.rows.length - 1);
+    const nRows = Math.max(1, g.rowCount - 1);
+    // Jam: the danger line glows as the bricks come down
+    if (g.endless) {
+      let low = FIELD_H;
+      for (const br of g.bricks) if (br.alive) low = Math.min(low, br.y - br.h / 2);
+      const near = clamp(1 - (low - BAL.jam.dangerY) / (BAL.field.rowPitch * 3), 0, 1);
+      const pulse = 0.5 + 0.5 * Math.sin(this.time * (4 + near * 8));
+      this.box(FIELD_W / 2, BAL.jam.dangerY, FIELD_W / 2, 1.2, 1.2, 0, 8, 0, [1.6, 0.25, 0.35], 0.25 + near * (0.5 + 0.5 * pulse), 0, 1);
+    }
     // the drop lands: a blast; while it lasts every kick hits the camera
     if (g.dropping) {
       if (!this.dropSeen) {
@@ -438,12 +463,15 @@ export class Renderer {
       const k = 0.85 + hit * 1.5 + sing * 1.2 + beat.kick * 0.12 + beat.groove * 0.15;
       // a hit brick jolts; everything shakes during the drop
       const jx = hit * Math.sin(t * 90) * 2.5 + (g.dropping ? Math.sin(t * 60 + br.id) * beat.kick * 3 : 0);
+      // Jam: slide down a row smoothly after a push
+      const sk = clamp((t - br.slideT) / 0.3, 0, 1);
+      const by = br.y + BAL.field.rowPitch * (1 - sk) * (1 - sk);
       if (br.special === 'drop') {
         // drop bricks: white-hot, pulsing with the kick
         const dk = 0.9 + beat.kick * 0.8 + 0.3 * Math.sin(this.time * 6 + br.id);
-        this.box(br.x + jx, br.y, br.w / 2, br.h / 2, 6, 1, 14, 1, mul(DROP, dk * k * 0.7), 1);
-      } else this.box(br.x + jx, br.y, br.w / 2, br.h / 2, 6, br.kind === 'hard' ? 3 : 1, 9, br.hp / br.maxHp, mul(c, k), 1);
-      if (br.special) this.glyph(br.special, br.x + jx, br.y, br.special === 'drop' ? [2.2, 2, 2.2] : mul([1.4, 1.4, 1.5], 0.7 + sing * 0.8 + hit * 0.8));
+        this.box(br.x + jx, by, br.w / 2, br.h / 2, 6, 1, 14, 1, mul(DROP, dk * k * 0.7), 1);
+      } else this.box(br.x + jx, by, br.w / 2, br.h / 2, 6, br.kind === 'hard' ? 3 : 1, 9, br.hp / br.maxHp, mul(c, k), 1);
+      if (br.special) this.glyph(br.special, br.x + jx, by, br.special === 'drop' ? [2.2, 2, 2.2] : mul([1.4, 1.4, 1.5], 0.7 + sing * 0.8 + hit * 0.8));
     }
 
     // rings
@@ -700,7 +728,7 @@ export class Renderer {
     const p = this.pComp.use().tex('u_scene', 0, this.scene.tex).tex('u_bloom', 1, this.bloom[0].tex)
       .f2('u_res', this.W, this.H).f1('u_time', this.time).f1('u_bloomAmt', this.bloomAmt).f1('u_ca', this.ca * 0.012)
       .f1('u_flash', this.flash).f3('u_tint', this.tint * 0.12, 0, this.tint * 0.02)
-      .f1('u_dim', this.dim * 0.55).f1('u_zoom', zoom).f2('u_shake', (this.r() - 0.5) * sh, (this.r() - 0.5) * sh).f1('u_glitch', this.glitch);
+      .f1('u_dim', this.dim * 0.55).f1('u_theme', this.theme).f1('u_zoom', zoom).f2('u_shake', (this.r() - 0.5) * sh, (this.r() - 0.5) * sh).f1('u_glitch', this.glitch);
     this.shocks = this.shocks.filter((s) => this.time - s.t0 < s.dur);
     for (let i = 0; i < 4; i++) {
       const s = this.shocks[i];

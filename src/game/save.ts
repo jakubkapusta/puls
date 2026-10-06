@@ -2,7 +2,7 @@
 
 import type { SpeedId, TestSel } from './tuning';
 
-export type SongRec = { best: number; passed: boolean; cleared: boolean; plays: number };
+export type SongRec = { best: number; passed: boolean; cleared: boolean; plays: number; stars: number };
 export type Meta = {
   v: 1;
   sound: boolean;
@@ -11,6 +11,11 @@ export type Meta = {
   test: Partial<TestSel> | null;
   speed: SpeedId;
   songs: Record<string, SongRec>;
+  /** the song of the day: one counted attempt per date */
+  daily: { date: string; song: string; score: number } | null;
+  jamBest: number;
+  lastSong: string;
+  lastAlbum: string;
 };
 export type PlayStat = {
   date: string; song: string; reason: string; passed: boolean; score: number; time: number;
@@ -37,7 +42,12 @@ function write(key: string, v: unknown) {
 
 export function loadMeta(): Meta {
   const m = read<Partial<Meta>>(KEY_META);
-  return { v: 1, sound: m?.sound ?? true, calib: m?.calib ?? null, test: m?.test ?? null, speed: m?.speed === 'fast' ? 'fast' : 'mid', songs: m?.songs ?? {} };
+  const songs = m?.songs ?? {};
+  for (const k of Object.keys(songs)) songs[k].stars ??= songs[k].cleared ? 2 : songs[k].passed ? 1 : 0;
+  return {
+    v: 1, sound: m?.sound ?? true, calib: m?.calib ?? null, test: m?.test ?? null, speed: m?.speed === 'fast' ? 'fast' : 'mid', songs,
+    daily: m?.daily ?? null, jamBest: m?.jamBest ?? 0, lastSong: m?.lastSong ?? 'nocna-jazda', lastAlbum: m?.lastAlbum ?? 'synthwave',
+  };
 }
 export const saveMeta = (m: Meta) => write(KEY_META, m);
 

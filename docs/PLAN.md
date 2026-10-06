@@ -15,6 +15,7 @@
 | Utrata piłki | **Życia + muzyka cichnie.** Kilka żyć na utwór. Spadek piłki: mnożnik się zeruje, jedna warstwa muzyki gaśnie, piłka wraca na paletkę. Utrata wszystkich żyć kończy poziom z wynikiem, ale bez zaliczenia. |
 | Trafienie w rytm | **Piłka w rytmie + uderzenie.** Gra delikatnie dopasowuje prędkość piłki, żeby spadała na paletkę na bit, więc całość „tańczy” z muzyką. Gracz może dodatkowo **uderzyć** (szybki ruch palca w górę, spacja, klik). Uderzenie w momencie kontaktu = trafienie w rytm: mnożnik, piłka się rozgrzewa. Samo złapanie też odbija piłkę, ale bez bonusu. |
 | Zakres przed testem | **M0–M1, potem STOP.** Czucie odbijania i rytmu z prostą grafiką i jednym utworem. Efekty wow i 5 utworów dopiero po teście właściciela na telefonie. |
+| M4 i M5 (2026-10-06) | Właściciel: „jedź z M4 i M5 od razu, będę testował później”. Łatwiej ocenić feel na kilku utworach. |
 | Po obejrzeniu M2 (2026-10-06) | Piłka i trafienie „idealnie” świeciły za mocno (piłka ginęła w kuli światła): przygaszone. Podłoże nie może falować. Dalej M3. |
 | Po teście M1 (2026-10-06) | Uderzenie ruchem palca w górę zostaje (wygodniejsze niż stuknięcie). Pierścień lądowania za bardzo ułatwia: domyślnie wyłączony. Prędkość piłki to wybór gracza w menu: średnia albo szybka, szybka daje +25% punktów. M1 odebrane, dalej M2. |
 | Język | Tekst dla gracza po polsku. Kod, komentarze i nazwy w kodzie po angielsku. Commity po polsku. |
@@ -214,11 +215,13 @@ Tło synthwave reagujące na muzykę, szklane klocki i odłamki, ślad piłki, f
 Mapa tempa wspólna dla gry i sekwencera (Metronom i Zwolnienie zmieniają tempo od najbliższej bezpiecznej kreski taktowej). Laser strzela na ósemki, a każdy strzał to staccato grane przez sekwencer w tym samym momencie. Magnes trzyma piłkę, a pchnięcie palcem ją wypuszcza. Polifonia: dopóki leci dodatkowa piłka, utrata głównej nie kosztuje życia. Drop: biały klocek, po zbiciu wszystkich 4 takty pełnego utworu, rozgrzanej piłki i podwójnych punktów.
 Klocki specjalne, power-upy, HUD i menu docelowe, podpowiedzi przy pierwszej grze, pełna pętla poziomu.
 
-### M4: MVP
+### M4: MVP (zrobione 2026-10-06)
+Synthwave: Nocna jazda, Neonowy brzeg, Kaseta z 86, Laserowy horyzont, Ostatni zachód (96–112 BPM, 2:14–2:43, 6–7 warstw, nowa warstwa „dzwonki”). Gwiazdki: zaliczony / wszystko zbite / wszystko zbite i ≥ 60% w rytm. Utwory odblokowują się po kolei, album Lo-fi po zaliczeniu trzeciego utworu synthwave.
 5 utworów synthwave (rosnąca długość i liczba warstw), wybór utworu, odblokowywanie, gwiazdki, rekordy, zapis.
 **Odbiór:** symulator spełnia cele, postęp przetrwa przeładowanie.
 
-### M5: Szlif i dalej
+### M5: Szlif i dalej (zrobione 2026-10-06, bez kolejnych albumów poza Lo-fi)
+Zrobione: „Twoja wersja” (nagranie zdarzeń i odsłuch przez ten sam syntezator), utwór dnia (pierwsza próba się liczy), tryb Jam (rzędy zjeżdżają coraz szybciej, tempo rośnie, koniec gdy klocki dotrą do czerwonej linii), album Lo-fi (3 utwory, 76–84 BPM, swing, Rhodes, winyl, miasto nocą w deszczu), dostosowanie jakości do słabszych telefonów. Do zrobienia: kolejne albumy (Chiptune, Techno, Ambient, Funk, D&B, Orkiestra).
 Nagranie i odsłuch swojej wersji, utwór dnia, tryb Jam, kolejne albumy (Lo-fi, Chiptune, …), wydajność na słabszych telefonach, offline.
 
 ---

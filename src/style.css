@@ -233,3 +233,47 @@ button, .clickable, input, summary { pointer-events: auto; }
 .howto-body ul { margin: 0; padding-left: 18px; }
 .howto-body li { margin: 3px 0; color: var(--dim); }
 .howto-body b { color: var(--ink); }
+
+/* ---------------------------------------------------------------- song select, modes, stars, replay */
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+.mode {
+  font: inherit; color: var(--ink); cursor: pointer; text-align: left; padding: 10px 12px; border-radius: 14px;
+  border: 1px solid rgba(56, 230, 255, 0.35); background: rgba(16, 6, 30, 0.6); display: flex; flex-direction: column; gap: 2px;
+}
+.mode b { font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: 0.06em; }
+.mode span { font-size: 11.5px; color: var(--dim); }
+.songs { background: rgba(10, 4, 20, 0.72); align-items: start; }
+.songs-in { width: min(100%, 440px); display: flex; flex-direction: column; gap: 10px; margin: 0 auto; }
+.songs-head { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 10px; }
+.songs-head h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 22px; letter-spacing: 0.06em; }
+.stars-total { color: var(--gold); font-weight: 600; text-shadow: 0 0 10px rgba(255, 190, 90, 0.6); }
+.album-tabs { display: flex; gap: 8px; }
+.tab {
+  flex: 1; font: inherit; font-family: var(--display); font-size: 14px; letter-spacing: 0.08em; color: var(--ink); cursor: pointer;
+  padding: 10px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.04);
+}
+.tab.on { border-color: var(--pink); background: rgba(255, 79, 180, 0.14); box-shadow: 0 0 12px rgba(255, 79, 180, 0.3); }
+.tab.locked { opacity: 0.55; }
+.album-sub { font-size: 13px; color: var(--dim); text-align: center; }
+.song-list { display: flex; flex-direction: column; gap: 8px; }
+.song-list.dim { opacity: 0.45; }
+.song {
+  font: inherit; color: var(--ink); cursor: pointer; display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px;
+  padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(176, 107, 255, 0.35); background: rgba(22, 8, 40, 0.75); text-align: left;
+}
+.song:not(.locked):active { transform: scale(0.98); }
+.song.locked { opacity: 0.5; cursor: default; }
+.song .n { font-family: var(--display); color: var(--dim); }
+.song .t b { display: block; font-weight: 600; font-size: 16px; }
+.song .t small, .song .r small { display: block; font-size: 11.5px; color: var(--dim); }
+.song .r { text-align: right; }
+.stars i, .end-stars i { font-style: normal; color: rgba(255, 255, 255, 0.18); }
+.stars i.on { color: var(--gold); text-shadow: 0 0 8px rgba(255, 190, 90, 0.7); }
+.end-stars { font-size: 34px; letter-spacing: 6px; margin: -4px 0 -6px; }
+.end-stars i.on { color: var(--gold); text-shadow: 0 0 14px rgba(255, 190, 90, 0.8); display: inline-block; animation: star 0.45s ease-out both; }
+@keyframes star { 0% { transform: scale(0); opacity: 0; } 70% { transform: scale(1.3); } 100% { transform: scale(1); opacity: 1; } }
+.replay { background: rgba(10, 4, 20, 0.35); align-items: end; }
+.replay .panel { margin-bottom: 8vh; }
+.replay-title { margin: -4px 0 0; color: var(--dim); }
+.replay-bar { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.replay-bar b { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--pink)); transform-origin: left; transform: scaleX(0); }

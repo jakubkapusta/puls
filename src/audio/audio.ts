@@ -9,9 +9,31 @@
 //               when a ball is lost, small UI blips.
 // The context starts on the first user gesture (browsers require it).
 
-import { midiHz, scaleNote, type Song, type LayerId } from '../music/song';
-import type { Game, GameEvent } from '../game/game';
+import { midiHz, scaleNote, type Song, type LayerId, type Kit } from '../music/song';
+import type { GameEvent } from '../game/game';
 import { BAL } from '../game/balance';
+import type { Tempo } from '../music/tempo';
+
+/** what the sequencer reads from the game (a replay fakes it from a recording) */
+export type SeqState = { layers: number; groove: boolean; dropStep: number; tempo: Tempo; fx: { laser: number } };
+
+/**
+ * "Twoja wersja": what the sequencer played, step by step, plus every brick note and effect at
+ * the time it really sounded. Replaying it through the same synth gives back the player's take.
+ */
+export type Recording = {
+  song: Song;
+  tempo: Tempo;
+  /** per 16th: layers (bits 0–3), groove (4), laser (5) */
+  flags: number[];
+  drops: number[];
+  notes: { t: number; m: number; h: number; p: boolean; v: number }[];
+  fx: { t: number; k: 'dip' | 'sweep' | 'echo' | 'riser' | 'perfect' | 'good'; a: number }[];
+  finaleStep: number;
+  endStep: number;
+  /** the level ended out of lives: the replay fades out like the game did */
+  fade: boolean;
+};
 
 const LOOKAHEAD = 0.12;
 const TICK_MS = 20;
@@ -41,7 +63,17 @@ export class Audio {
 
   // song
   song: Song | null = null;
-  private game: Game | null = null;
+  private game: SeqState | null = null;
+  private kit: Kit = 'synth';
+  /** the master filter's open frequency (lo-fi is darker) */
+  private open = 20000;
+  /** the take being recorded, the last finished one, and a replay in progress */
+  private rec: Recording | null = null;
+  lastTake: Recording | null = null;
+  replaying: Recording | null = null;
+  private repNote = 0;
+  private repFx = 0;
+  private bed: { src: AudioBufferSourceNode; g: GainNode } | null = null;
   private start = 0;
   private stepI = 0;
   private stepT = 0;
@@ -177,10 +209,16 @@ export class Audio {
   }
 
   // ------------------------------------------------------------ song
-  play(song: Song, game: Game) {
+  play(song: Song, game: SeqState, replay: Recording | null = null) {
     this.stopSong(0);
     this.song = song;
     this.game = game;
+    this.kit = song.kit;
+    this.open = song.kit === 'lofi' ? 7500 : 20000;
+    this.replaying = replay;
+    this.repNote = 0;
+    this.repFx = 0;
+    this.rec = replay ? null : { song, tempo: game.tempo, flags: [], drops: [], notes: [], fx: [], finaleStep: -1, endStep: -1, fade: false };
     this.finaleStep = -1;
     this.offOk = false;
     this.last = -Infinity;
@@ -199,9 +237,10 @@ export class Audio {
     this.stopped = false;
     this.filt.frequency.cancelScheduledValues(ctx.currentTime);
     this.filt.frequency.setValueAtTime(380, this.start);
-    this.filt.frequency.exponentialRampToValueAtTime(20000, this.start + game.tempo.timeAt(song.intro * 16));
+    this.filt.frequency.exponentialRampToValueAtTime(this.open, this.start + game.tempo.timeAt(song.intro * 16));
     if (this.delayNode) this.delayNode.delayTime.value = song.s16 * 3;
     this.lastS16 = song.s16;
+    if (this.kit === 'lofi') this.vinyl(this.start);
     clearInterval(this.timer);
     this.timer = window.setInterval(() => this.schedule(), TICK_MS);
     this.schedule();
@@ -211,16 +250,94 @@ export class Audio {
   stopSong(fade = 0.4) {
     clearInterval(this.timer);
     this.timer = 0;
+    if (this.rec && !this.stopped) {
+      this.rec.endStep = this.stepI;
+      this.rec.fade = fade > 0.5;
+      if (this.rec.flags.length > 16) this.lastTake = this.rec;
+    }
+    this.rec = null;
+    this.replaying = null;
     this.stopped = true;
     this.song = null;
     this.game = null;
+    if (this.bed && this.ctx) {
+      const t = this.ctx.currentTime;
+      this.bed.g.gain.setTargetAtTime(0, t, 0.3);
+      this.bed.src.stop(t + 1.5);
+      this.bed = null;
+    }
     if (this.ctx && fade > 0) {
       const t = this.ctx.currentTime;
       this.filt.frequency.cancelScheduledValues(t);
       this.filt.frequency.setValueAtTime(this.filt.frequency.value, t);
       this.filt.frequency.exponentialRampToValueAtTime(200, t + fade);
       this.filt.frequency.setValueAtTime(20000, t + fade + 0.6);
+    } else if (this.ctx) {
+      const t = this.ctx.currentTime;
+      this.filt.frequency.cancelScheduledValues(t);
+      this.filt.frequency.setValueAtTime(20000, t);
     }
+  }
+
+  // ------------------------------------------------------------ "Twoja wersja"
+  /** Plays a recorded take back through the synth. */
+  playReplay(rec: Recording) {
+    const st: SeqState = { layers: 0, groove: false, dropStep: -1, tempo: rec.tempo, fx: { laser: -1 } };
+    this.play(rec.song, st, rec);
+    this.finaleStep = rec.finaleStep;
+  }
+
+  /** 0..1 how far the replay is */
+  replayProgress() {
+    const r = this.replaying;
+    if (!r || !this.ctx) return 0;
+    const end = r.endStep > 0 ? r.endStep : r.song.bars * 16;
+    return Math.min(1, Math.max(0, r.tempo.stepAt(this.ctx.currentTime - this.start) / end));
+  }
+
+  /** the replay's state on step i, from the recorded flags */
+  private replayState(i: number) {
+    const r = this.replaying!, g = this.game!;
+    const f = r.flags[i] ?? r.flags[r.flags.length - 1] ?? 0;
+    g.layers = f & 15;
+    g.groove = !!(f & 16);
+    g.fx.laser = f & 32 ? Infinity : -1;
+    const dropLen = 16 * BAL.drop.bars;
+    g.dropStep = r.drops.find((d) => i < d + dropLen) ?? -1;
+  }
+
+  /** the replay's notes and effects that fall in the scheduling window */
+  private replayEvents(until: number) {
+    const r = this.replaying!;
+    while (this.repNote < r.notes.length && this.start + r.notes[this.repNote].t < until) {
+      const n = r.notes[this.repNote++];
+      const t = Math.max(this.ctx!.currentTime + 0.005, this.start + n.t);
+      this.brick(t, n.m, n.h, n.p, n.v);
+    }
+    while (this.repFx < r.fx.length && this.start + r.fx[this.repFx].t < until) {
+      const e = r.fx[this.repFx++];
+      const t = Math.max(this.ctx!.currentTime + 0.005, this.start + e.t);
+      if (e.k === 'dip') this.dip(t);
+      else if (e.k === 'sweep') this.sweep(t);
+      else if (e.k === 'echo') this.echoBoost(t);
+      else if (e.k === 'riser') this.riser(this.start + e.a, t);
+      else this.accent(t, e.k === 'perfect', e.a);
+    }
+  }
+
+  /** lo-fi: a soft vinyl hiss under the whole song (the pops come per step) */
+  private vinyl(t: number) {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    g.gain.setTargetAtTime(0.012, t, 0.5);
+    src.connect(this.filter('bandpass', 3200, 0.6, g));
+    g.connect(this.master);
+    src.start(t);
+    this.bed = { src, g };
   }
 
   paused = false;
@@ -239,8 +356,19 @@ export class Audio {
   private schedule() {
     const ctx = this.ctx, song = this.song;
     if (!ctx || !song || this.stopped) return;
+    const swing = song.swing ?? 0;
     while (this.stepT < ctx.currentTime + LOOKAHEAD) {
-      if (!this.step(this.stepI, this.stepT)) {
+      if (this.replaying) {
+        if (this.replaying.endStep > 0 && this.stepI >= this.replaying.endStep) {
+          const fade = this.replaying.fade;
+          this.stopSong(fade ? 1.2 : 0.01);
+          return;
+        }
+        this.replayState(this.stepI);
+      }
+      // swing: odd 16ths come a little late (lo-fi)
+      const T = this.stepI % 2 ? this.stepT + swing * this.game!.tempo.s16At(this.stepT - this.start) : this.stepT;
+      if (!this.step(this.stepI, T)) {
         clearInterval(this.timer);
         this.timer = 0;
         return;
@@ -248,6 +376,7 @@ export class Audio {
       this.stepI++;
       this.stepT = this.start + this.game!.tempo.timeAt(this.stepI);
     }
+    if (this.replaying) this.replayEvents(ctx.currentTime + LOOKAHEAD);
     // forget old beat marks
     while (this.beats.length && this.beats[0].t < ctx.currentTime - 2) this.beats.shift();
   }
@@ -277,6 +406,11 @@ export class Audio {
 
     const intro = bar < song.intro;
     const drop = g.dropStep >= 0 && i >= g.dropStep && i < g.dropStep + 16 * BAL.drop.bars;
+    if (this.rec) {
+      this.rec.flags[i] = Math.min(15, g.layers) | (g.groove ? 16 : 0) | (T - this.start < g.fx.laser ? 32 : 0);
+      if (g.dropStep >= 0 && !this.rec.drops.includes(g.dropStep)) this.rec.drops.push(g.dropStep);
+    }
+    if (this.kit === 'lofi' && Math.random() < 0.12) this.pop(T + Math.random() * s16);
     const on = new Set<LayerId>(intro ? [] : drop ? song.layers : song.layers.slice(0, g.layers));
     const pat = (p: string) => p[s] ?? '.';
     const heardT = T - this.start;
@@ -292,10 +426,12 @@ export class Audio {
       if (drop) this.sub(T, croot - 12, beat * 0.9);
     }
     // bass (always); the bass2 layer drives it in 16ths
-    const bch = on.has('bass2') ? (pat(song.bass) === '.' ? 'x' : pat(song.bass)) : pat(song.bass);
+    // (lo-fi walks in 8ths instead: its round bass would blur in 16ths)
+    const drive = on.has('bass2') && (this.kit !== 'lofi' || s % 2 === 0);
+    const bch = drive ? (pat(song.bass) === '.' ? (this.kit === 'lofi' && s % 4 === 2 ? '5' : 'x') : pat(song.bass)) : pat(song.bass);
     if (bch !== '.') {
       const m = croot + (bch === 'o' ? 12 : bch === '5' ? 7 : 0);
-      this.bass(T, m, s16 * (on.has('bass2') ? 0.9 : 1.7), on.has('bass2') ? 0.85 : 1);
+      this.bass(T, m, s16 * (drive ? 0.9 : 1.7), drive ? 0.85 : 1);
     }
     if (on.has('hat') && pat(song.hat) !== '.') {
       this.hat(T, 0.5, true);
@@ -318,6 +454,13 @@ export class Audio {
       else if (c === 'o') this.clap(T, 0.5);
     }
     if (on.has('pad') && s === 0) this.pad(T, chord.tones.map((t) => croot + 24 + t), s16 * 16 * 0.98);
+    if (on.has('bells') && song.bells) {
+      const c = pat(song.bells);
+      if (c !== '.') {
+        const idx = parseInt(c, 10), n = chord.tones.length;
+        this.bell(T, croot + 36 + chord.tones[idx % n] + 12 * Math.floor(idx / n), this.kit === 'lofi' ? 0.035 : 0.045);
+      }
+    }
     if (on.has('arp')) {
       const c = pat(song.arp);
       if (c !== '.') {
@@ -353,8 +496,8 @@ export class Audio {
     switch (e.type) {
       case 'brick': {
         const t = this.quantize(GRACE);
-        if (e.chord) for (const m of e.chord) this.brick(t, m, Math.max(e.heat, 2), false, 0.6);
-        else this.brick(t, e.midi, e.heat, e.pierce);
+        if (e.chord) for (const m of e.chord) this.note(t, m, Math.max(e.heat, 2), false, 0.6);
+        else this.note(t, e.midi, e.heat, e.pierce, 1);
         this.noteTimes.push({ id: e.brick.id, t });
         if (this.noteTimes.length > 64) this.noteTimes.shift();
         break;
@@ -362,6 +505,7 @@ export class Audio {
       case 'judge': {
         const t = this.quantize(ACCENT_GRACE);
         this.accent(t, e.judge === 'perfect', e.heat);
+        this.rec?.fx.push({ t: t - this.start, k: e.judge, a: e.heat });
         break;
       }
       case 'catch':
@@ -382,17 +526,22 @@ export class Audio {
         if (e.special === 'tempoUp' || e.special === 'tempoDown') this.tickTock(this.quantize(GRACE), e.special === 'tempoUp');
         break;
       case 'filter':
-        this.sweep();
+        this.sweep(ctx.currentTime);
+        this.rec?.fx.push({ t: ctx.currentTime - this.start, k: 'sweep', a: 0 });
         break;
       case 'echo':
-        this.echoBoost();
+        this.echoBoost(ctx.currentTime);
+        this.rec?.fx.push({ t: ctx.currentTime - this.start, k: 'echo', a: 0 });
         break;
       case 'dropArm':
         this.bell(this.quantize(GRACE), scaleNote(this.song, 18 + (e.total - e.left) * 2), 0.08);
         break;
-      case 'drop':
-        this.riser(this.start + this.game!.tempo.timeAt(e.atStep));
+      case 'drop': {
+        const at = this.game!.tempo.timeAt(e.atStep);
+        this.riser(this.start + at, ctx.currentTime + 0.01);
+        this.rec?.fx.push({ t: ctx.currentTime + 0.01 - this.start, k: 'riser', a: at });
         break;
+      }
       case 'power':
         this.sparkle(this.quantize(GRACE), 6);
         break;
@@ -400,13 +549,15 @@ export class Audio {
         this.bell(this.quantize(GRACE), scaleNote(this.song, 20), 0.07);
         break;
       case 'lost':
-        this.dip();
+        this.dip(ctx.currentTime);
+        this.rec?.fx.push({ t: ctx.currentTime - this.start, k: 'dip', a: 0 });
         break;
       case 'clear': {
         // the finale lands on the next downbeat (the game ends the level a bar after it)
         const song = this.song;
         const pos = this.game!.tempo.stepAt(ctx.currentTime + 0.03 - this.start);
         this.finaleStep = Math.max(this.stepI, Math.ceil(pos / 16) * 16);
+        if (this.rec) this.rec.finaleStep = this.finaleStep;
         void song;
         break;
       }
@@ -416,6 +567,12 @@ export class Audio {
       default:
         break;
     }
+  }
+
+  /** a brick note now and in the take */
+  private note(t: number, m: number, h: number, p: boolean, v: number) {
+    this.brick(t, m, h, p, v);
+    this.rec?.notes.push({ t: t - this.start, m, h, p, v });
   }
 
   /** for the renderer: when each brick's note actually sounds (ctx time) */
@@ -487,6 +644,7 @@ export class Audio {
   }
 
   private kick(t: number, v: number) {
+    if (this.kit === 'lofi') return this.kickL(t, v);
     const g = this.gain(this.drums);
     this.env(g.gain, t, v, 0.002, 0.42);
     const o = this.osc('sine', 165, t, 0.45, g);
@@ -497,6 +655,7 @@ export class Audio {
   }
 
   private snare(t: number, v: number) {
+    if (this.kit === 'lofi') return this.snareL(t, v);
     const g = this.gain(this.drums);
     this.env(g.gain, t, 0.42 * v, 0.002, 0.2);
     const send = this.gain(this.verb, 0.9 * v);
@@ -510,12 +669,14 @@ export class Audio {
   }
 
   private hat(t: number, v: number, open: boolean) {
+    if (this.kit === 'lofi') return this.hatL(t, v, open);
     const g = this.gain(this.drums);
     this.env(g.gain, t, 0.16 * v, 0.001, open ? 0.2 : 0.04);
     this.noiseSrc(t, open ? 0.25 : 0.06, this.filter('highpass', open ? 7500 : 9000, 0.6, g));
   }
 
   private clap(t: number, v: number) {
+    if (this.kit === 'lofi') return this.clapL(t, v);
     const g = this.gain(this.drums);
     const p = g.gain;
     p.setValueAtTime(0.0001, t);
@@ -532,6 +693,7 @@ export class Audio {
   }
 
   private bass(t: number, m: number, dur: number, v: number) {
+    if (this.kit === 'lofi') return this.bassL(t, m, dur, v);
     const g = this.gain(this.music);
     const p = g.gain;
     p.setValueAtTime(0.0001, t);
@@ -547,6 +709,7 @@ export class Audio {
   }
 
   private pad(t: number, ms: number[], dur: number) {
+    if (this.kit === 'lofi') return this.padL(t, ms, dur);
     const g = this.gain(this.music);
     const p = g.gain;
     p.setValueAtTime(0.0001, t);
@@ -563,6 +726,7 @@ export class Audio {
   }
 
   private arp(t: number, m: number) {
+    if (this.kit === 'lofi') return this.arpL(t, m);
     const g = this.gain(this.music);
     this.env(g.gain, t, 0.07, 0.003, 0.16);
     g.connect(this.gain(this.delay, 0.6));
@@ -573,6 +737,7 @@ export class Audio {
   }
 
   private lead(t: number, m: number, dur: number) {
+    if (this.kit === 'lofi') return this.leadL(t, m, dur);
     const g = this.gain(this.music);
     const p = g.gain;
     p.setValueAtTime(0.0001, t);
@@ -600,6 +765,7 @@ export class Audio {
 
   /** a brick: a plucked note, brighter and fuller as the ball heats up */
   private brick(t: number, m: number, heat: number, pierce: boolean, vol = 1) {
+    if (this.kit === 'lofi') return this.brickL(t, m, heat, pierce, vol);
     const g = this.gain(this.notes);
     this.env(g.gain, t, 0.2 * vol, 0.003, 0.55 + heat * 0.05);
     g.connect(this.gain(this.delay, 0.45));
@@ -659,20 +825,20 @@ export class Audio {
   }
 
   /** the Filtr brick: the whole mix closes over a beat and opens again over two */
-  private sweep() {
-    const ctx = this.ctx!, f = this.filt.frequency, t = ctx.currentTime;
+  private sweep(t: number) {
+    const f = this.filt.frequency;
     const beat = this.game!.tempo.s16At(t - this.start) * 4;
     f.cancelScheduledValues(t);
-    f.setValueAtTime(Math.min(20000, f.value), t);
+    f.setValueAtTime(this.open, t);
     f.exponentialRampToValueAtTime(260, t + beat);
     f.setValueAtTime(260, t + beat * 1.5);
-    f.exponentialRampToValueAtTime(20000, t + beat * 3.5);
+    f.exponentialRampToValueAtTime(this.open, t + beat * 3.5);
   }
 
   /** the Echo brick: the echo feeds back longer for a while */
-  private echoBoost() {
+  private echoBoost(t: number) {
     if (!this.fb) return;
-    const t = this.ctx!.currentTime, g = this.fb.gain;
+    const g = this.fb.gain;
     g.cancelScheduledValues(t);
     g.setValueAtTime(g.value, t);
     g.linearRampToValueAtTime(0.62, t + 0.1);
@@ -701,8 +867,7 @@ export class Audio {
   }
 
   /** before the drop: noise rising into it */
-  private riser(at: number) {
-    const ctx = this.ctx!, t = ctx.currentTime + 0.01;
+  private riser(at: number, t: number) {
     if (at <= t + 0.1) return;
     const g = this.gain(this.drums);
     g.gain.setValueAtTime(0.0001, t);
@@ -734,14 +899,14 @@ export class Audio {
   }
 
   /** a lost ball: the whole mix sinks under a closing filter and comes back */
-  private dip() {
-    const ctx = this.ctx!, f = this.filt.frequency, t = ctx.currentTime;
+  private dip(t: number) {
+    const f = this.filt.frequency;
     const beat = this.game ? this.game.tempo.s16At(t - this.start) * 4 : 0.5;
     f.cancelScheduledValues(t);
-    f.setValueAtTime(Math.min(20000, f.value), t);
+    f.setValueAtTime(this.open, t);
     f.exponentialRampToValueAtTime(320, t + 0.18);
     f.setValueAtTime(320, t + beat);
-    f.exponentialRampToValueAtTime(20000, t + beat * 3);
+    f.exponentialRampToValueAtTime(this.open, t + beat * 3);
     const g = this.gain(this.sfx);
     this.env(g.gain, t, 0.14, 0.01, 0.7);
     const o = this.osc('sawtooth', 440, t, 0.75, this.filter('lowpass', 1500, 2, g));
@@ -772,6 +937,133 @@ export class Audio {
     this.env(g.gain, t, 0.22, 0.002, 1.8);
     g.connect(this.gain(this.verb, 0.6));
     this.noiseSrc(t, 1.9, this.filter('highpass', 5000, 0.4, g));
+  }
+
+  // ------------------------------------------------------------ lo-fi kit
+  // Warm and soft: a round kick, a dusty snare, dull hats and a shaker, a sine bass, a Rhodes-like
+  // electric piano with tremolo, muted keys, a breathy flute lead; everything a bit darker.
+
+  private kickL(t: number, v: number) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.85 * v, 0.004, 0.5);
+    const o = this.osc('sine', 120, t, 0.55, this.filter('lowpass', 900, 0.7, g));
+    o.frequency.exponentialRampToValueAtTime(48, t + 0.16);
+  }
+
+  private snareL(t: number, v: number) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.3 * v, 0.003, 0.16);
+    g.connect(this.gain(this.verb, 0.5 * v));
+    this.noiseSrc(t, 0.2, this.filter('lowpass', 4200, 0.6, this.filter('highpass', 900, 0.6, g)));
+    const tg = this.gain(this.drums);
+    this.env(tg.gain, t, 0.22 * v, 0.002, 0.07);
+    this.osc('triangle', 185, t, 0.08, tg);
+  }
+
+  private hatL(t: number, v: number, open: boolean) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.11 * v, 0.002, open ? 0.12 : 0.035);
+    this.noiseSrc(t, 0.15, this.filter('lowpass', 8500, 0.5, this.filter('highpass', 5500, 0.6, g)));
+  }
+
+  /** lo-fi `perc`: 'x' a soft shaker, 'o' a rim click */
+  private clapL(t: number, v: number) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.22 * v, 0.001, 0.04);
+    this.osc('triangle', 1700, t, 0.05, this.filter('bandpass', 1700, 4, g));
+  }
+
+  private bassL(t: number, m: number, dur: number, v: number) {
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.3 * v, t + 0.02);
+    p.setValueAtTime(0.3 * v, t + dur * 1.4);
+    p.exponentialRampToValueAtTime(0.0001, t + dur * 2.2);
+    const f = midiHz(m);
+    const lp = this.filter('lowpass', 500, 0.7, g);
+    this.osc('sine', f, t, dur * 2.2, lp);
+    this.osc('triangle', f, t, dur * 2.2, this.gain(lp, 0.4));
+  }
+
+  /** a Rhodes-ish chord: sine + a fast-decaying bell partial, tremolo, wide reverb */
+  private padL(t: number, ms: number[], dur: number) {
+    const ctx = this.ctx!;
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.06, t + 0.01);
+    p.exponentialRampToValueAtTime(0.025, t + dur * 0.6);
+    p.exponentialRampToValueAtTime(0.0001, t + dur + 0.6);
+    g.connect(this.gain(this.verb, 0.9));
+    const trem = this.gain(g, 1);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 4.2;
+    const lg = ctx.createGain();
+    lg.gain.value = 0.25;
+    lfo.connect(lg).connect(trem.gain);
+    lfo.start(t);
+    lfo.stop(t + dur + 0.7);
+    for (const m of ms) {
+      const f = midiHz(m - 12);
+      this.osc('sine', f, t, dur + 0.6, trem);
+      const bg = this.gain(trem);
+      this.env(bg.gain, t, 0.35, 0.002, 0.5);
+      this.osc('sine', f * 4, t, 0.6, bg);
+    }
+  }
+
+  private arpL(t: number, m: number) {
+    const g = this.gain(this.music);
+    this.env(g.gain, t, 0.06, 0.004, 0.22);
+    g.connect(this.gain(this.verb, 0.4));
+    this.osc('triangle', midiHz(m), t, 0.3, this.filter('lowpass', 1800, 0.8, g));
+  }
+
+  /** a breathy flute: sine with vibrato and a little noise */
+  private leadL(t: number, m: number, dur: number) {
+    const ctx = this.ctx!;
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.07, t + 0.06);
+    p.setValueAtTime(0.06, t + Math.max(0.08, dur - 0.05));
+    p.exponentialRampToValueAtTime(0.0001, t + dur + 0.2);
+    g.connect(this.gain(this.verb, 0.6));
+    const o = this.osc('sine', midiHz(m), t, dur + 0.25, g);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 5;
+    const lg = ctx.createGain();
+    lg.gain.setValueAtTime(0, t);
+    lg.gain.linearRampToValueAtTime(12, t + Math.min(0.4, dur));
+    lfo.connect(lg).connect(o.detune);
+    lfo.start(t);
+    lfo.stop(t + dur + 0.3);
+    const ng = this.gain(g);
+    this.env(ng.gain, t, 0.15, 0.03, 0.15);
+    this.noiseSrc(t, 0.25, this.filter('bandpass', midiHz(m) * 2, 3, ng));
+  }
+
+  /** lo-fi bricks: soft keys, warmer as the ball heats */
+  private brickL(t: number, m: number, heat: number, pierce: boolean, vol: number) {
+    const g = this.gain(this.notes);
+    this.env(g.gain, t, 0.17 * vol, 0.004, 0.8 + heat * 0.08);
+    g.connect(this.gain(this.verb, 0.45));
+    g.connect(this.gain(this.delay, 0.2));
+    const f = midiHz(m);
+    const lp = this.filter('lowpass', 1600 + heat * 600, 0.7, g);
+    this.osc('triangle', f, t, 1, lp);
+    const bg = this.gain(lp);
+    this.env(bg.gain, t, 0.3, 0.002, 0.25);
+    this.osc('sine', f * 3, t, 0.3, bg);
+    if (heat >= 3 || pierce) this.bell(t, m + 12, 0.05);
+  }
+
+  /** a vinyl pop */
+  private pop(t: number) {
+    const g = this.gain(this.master);
+    this.env(g.gain, t, 0.05 + Math.random() * 0.05, 0.0005, 0.006);
+    this.noiseSrc(t, 0.01, this.filter('highpass', 1500, 0.5, g));
   }
 
   // ------------------------------------------------------------ calibration

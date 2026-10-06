@@ -127,6 +127,22 @@ export const BAL = {
     /** a ball held by the magnet goes by itself after this many seconds */
     magnetHold: 1.2,
   },
+  jam: {
+    /** rows at the start, a new row every pushBars bars; the game is over when a brick gets
+     *  below dangerY */
+    startRows: 7,
+    pushBars: 3,
+    minBars: 2,
+    faster: 12,
+    dangerY: 430,
+    /** the tempo rises by tempoStep every tempoEvery bars, up to maxFactor */
+    tempoEvery: 16,
+    tempoStep: 0.04,
+    maxFactor: 1.35,
+    gap: 0.22,
+    hard: 0.1,
+    special: 0.09,
+  },
   lives: 3,
   /** fraction of bricks needed to pass when the song ends */
   passFrac: 0.6,

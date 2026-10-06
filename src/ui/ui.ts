@@ -18,6 +18,20 @@ export type UIHandlers = {
   calibTap: (ms: number) => void;
   calibSet: (ms: number) => void;
   calibDone: () => void;
+  songs: () => void;
+  pick: (id: string) => void;
+  album: (id: string) => void;
+  daily: () => void;
+  jam: () => void;
+  next: () => void;
+  listen: () => void;
+  stopListen: () => void;
+};
+
+/** the song list as the menu shows it */
+export type AlbumView = {
+  id: string; title: string; sub: string; locked: boolean; lockNote: string;
+  songs: { id: string; title: string; meta: string; stars: number; best: number; locked: boolean }[];
 };
 
 export type EndInfo = {
@@ -27,6 +41,10 @@ export type EndInfo = {
   score: number;
   best: boolean;
   rows: [string, string][];
+  /** -1: no stars (Jam, daily shows them too) */
+  stars: number;
+  canNext: boolean;
+  canListen: boolean;
 };
 
 const $ = <T extends HTMLElement>(root: HTMLElement, sel: string) => root.querySelector(sel) as T;
@@ -44,6 +62,10 @@ export class UI {
   private pauseEl: HTMLElement;
   private end: HTMLElement;
   private calib: HTMLElement;
+  private songsEl: HTMLElement;
+  private replayEl: HTMLElement;
+  private albums: AlbumView[] = [];
+  private albumId = '';
   private howto: HTMLElement;
   private card: HTMLElement;
   private debug: HTMLElement;
@@ -72,6 +94,10 @@ export class UI {
           <p class="tag">Każdy klocek jest nutą. Utwór powstaje z tego, jak grasz.</p>
           <button class="btn primary play">Graj</button>
           <div class="song-line"></div>
+          <div class="modes">
+            <button class="mode daily-btn"><b>Utwór dnia</b><span class="daily-sub"></span></button>
+            <button class="mode jam-btn"><b>Jam</b><span class="jam-sub"></span></button>
+          </div>
           <div class="speed"><span>Piłka</span><div class="chips speed-chips"></div></div>
           <div class="row-btns">
             <button class="btn small howto-open">Jak grać</button>
@@ -98,15 +124,40 @@ export class UI {
         <div class="panel">
           <h2 class="end-title"></h2>
           <p class="end-sub"></p>
+          <div class="end-stars"></div>
           <div class="end-score"></div>
           <div class="end-best">Nowy rekord!</div>
           <div class="end-rows"></div>
-          <button class="btn primary again">Jeszcze raz</button>
-          <button class="btn to-menu">Menu</button>
+          <button class="btn primary next-btn">Dalej</button>
+          <button class="btn again">Jeszcze raz</button>
+          <button class="btn listen-btn">Posłuchaj swojej wersji</button>
+          <button class="btn to-songs">Utwory</button>
         </div>
       </div>
 
       <div class="title-card"><h2></h2><p></p></div>
+
+      <div class="screen songs">
+        <div class="songs-in">
+          <div class="songs-head">
+            <button class="icon-btn back-btn" aria-label="Wróć"><svg viewBox="0 0 16 16"><path d="M10 2 4 8l6 6" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+            <h2>Utwory</h2>
+            <div class="stars-total"></div>
+          </div>
+          <div class="album-tabs"></div>
+          <div class="album-sub"></div>
+          <div class="song-list"></div>
+        </div>
+      </div>
+
+      <div class="screen replay">
+        <div class="panel">
+          <h2>Twoja wersja</h2>
+          <p class="replay-title"></p>
+          <div class="replay-bar"><b></b></div>
+          <button class="btn stop-listen">Zatrzymaj</button>
+        </div>
+      </div>
 
       <div class="screen howto">
         <div class="panel wide">
@@ -161,6 +212,8 @@ export class UI {
     this.pauseEl = $(root, '.pause');
     this.end = $(root, '.end');
     this.calib = $(root, '.calib');
+    this.songsEl = $(root, '.songs');
+    this.replayEl = $(root, '.replay');
     this.howto = $(root, '.howto');
     this.card = $(root, '.title-card');
     this.debug = $(root, '.debug');
@@ -171,7 +224,14 @@ export class UI {
         e.stopPropagation();
         f();
       }));
-    on('.play', () => h.play());
+    on('.play', () => h.songs());
+    on('.back-btn', () => h.menu());
+    on('.to-songs', () => h.songs());
+    on('.daily-btn', () => h.daily());
+    on('.jam-btn', () => h.jam());
+    on('.next-btn', () => h.next());
+    on('.listen-btn', () => h.listen());
+    on('.stop-listen', () => h.stopListen());
     on('.pause-btn', () => h.pause());
     on('.resume', () => h.resume());
     on('.to-menu', () => h.menu());
@@ -201,7 +261,7 @@ export class UI {
 
   // ------------------------------------------------------------ screens
   private show(el: HTMLElement | null) {
-    for (const s of [this.menu, this.pauseEl, this.end, this.calib, this.howto]) s.classList.toggle('show', s === el);
+    for (const s of [this.menu, this.pauseEl, this.end, this.calib, this.howto, this.songsEl, this.replayEl]) s.classList.toggle('show', s === el);
   }
 
   showMenu(sel: TestSel, songLine: string, speed: SpeedId) {
@@ -256,7 +316,64 @@ export class UI {
     this.show(null);
   }
 
+  /** the menu's daily and Jam lines */
+  setModes(daily: string, jam: string) {
+    $(this.root, '.daily-sub').textContent = daily;
+    $(this.root, '.jam-sub').textContent = jam;
+  }
+
+  showSongs(albums: AlbumView[], albumId: string, totalStars: number) {
+    this.albums = albums;
+    this.albumId = albumId;
+    $(this.root, '.stars-total').textContent = `★ ${totalStars}`;
+    this.renderSongs();
+    this.show(this.songsEl);
+    this.hudVisible(false);
+  }
+
+  private renderSongs() {
+    const tabs = $(this.root, '.album-tabs');
+    tabs.innerHTML = this.albums.map((a) => `<button class="tab${a.id === this.albumId ? ' on' : ''}${a.locked ? ' locked' : ''}" data-id="${a.id}">${a.title}</button>`).join('');
+    tabs.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.albumId = b.dataset.id!;
+      this.renderSongs();
+      this.h.album(this.albumId);
+    }));
+    const a = this.albums.find((x) => x.id === this.albumId) ?? this.albums[0];
+    $(this.root, '.album-sub').textContent = a.locked ? a.lockNote : a.sub;
+    const stars = (n: number) => '<i class="on">★</i>'.repeat(n) + '<i>★</i>'.repeat(3 - n);
+    const list = $(this.root, '.song-list');
+    list.innerHTML = a.songs.map((sg, i) => `
+      <button class="song${sg.locked ? ' locked' : ''}" data-id="${sg.id}" ${sg.locked ? 'disabled' : ''}>
+        <span class="n">${i + 1}</span>
+        <span class="t"><b>${sg.title}</b><small>${sg.meta}</small></span>
+        <span class="r">${sg.locked ? '<span class="lock">🔒</span>' : `<span class="stars">${stars(sg.stars)}</span><small>${sg.best ? sg.best.toLocaleString('pl-PL') : '—'}</small>`}</span>
+      </button>`).join('');
+    list.classList.toggle('dim', a.locked);
+    list.querySelectorAll<HTMLButtonElement>('.song:not(.locked)').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!a.locked) this.h.pick(b.dataset.id!);
+    }));
+  }
+
+  showReplay(title: string) {
+    $(this.root, '.replay-title').textContent = title;
+    this.replayProgress(0);
+    this.show(this.replayEl);
+  }
+
+  replayProgress(k: number) {
+    $(this.root, '.replay-bar b').style.transform = `scaleX(${k})`;
+  }
+
   showEnd(e: EndInfo) {
+    const st = $(this.root, '.end-stars');
+    st.style.display = e.stars < 0 ? 'none' : '';
+    st.innerHTML = [0, 1, 2].map((i) => `<i class="${i < e.stars ? 'on' : ''}" style="animation-delay:${0.25 + i * 0.22}s">★</i>`).join('');
+    $(this.root, '.next-btn').style.display = e.canNext ? '' : 'none';
+    $(this.root, '.again').classList.toggle('primary', !e.canNext);
+    $(this.root, '.listen-btn').style.display = e.canListen ? '' : 'none';
     $(this.root, '.end-title').textContent = e.title;
     $(this.root, '.end-sub').textContent = e.sub;
     $(this.root, '.end-score').textContent = e.score.toLocaleString('pl-PL');
@@ -313,7 +430,7 @@ export class UI {
       const n = g.song.layers.length;
       this.layers.innerHTML = Array.from({ length: n }, (_, i) => `<i class="${i < g.layers ? 'on' : ''}"></i>`).join('');
     }
-    this.bar.style.transform = `scaleX(${Math.min(1, Math.max(0, g.t / g.song.length))})`;
+    this.bar.style.transform = `scaleX(${g.endless ? 0 : Math.min(1, Math.max(0, g.t / g.length))})`;
   }
 
   resetHud() {

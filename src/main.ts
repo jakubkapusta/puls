@@ -8,15 +8,20 @@ import { Audio } from './audio/audio';
 import { Game, type PowerId, type SpecialId } from './game/game';
 import { BAL, mergeBal, resetBal } from './game/balance';
 import { Input } from './game/input';
-import { UI, type EndInfo } from './ui/ui';
+import { UI, type AlbumView, type EndInfo } from './ui/ui';
 import { applySpeed, applyTest, fullSel, testTag, type TestSel } from './game/tuning';
 import { hintSeen, loadMeta, logPlay, markHint, saveMeta, today } from './game/save';
 import { Bot } from './sim/bot';
-import { SONGS } from './music/songs';
+import { ALBUMS, JAM, SONGS, songById } from './music/songs';
 import type { LayerId, Song } from './music/song';
+import type { Tempo } from './music/tempo';
+import type { Recording } from './audio/audio';
+import { albumUnlocked, dailyPick, nextSong, rec as songRec, songUnlocked, starsFor, totalStars } from './game/progress';
 import { clamp, damp } from './core/math';
 
-type Mode = 'menu' | 'play' | 'pause' | 'end' | 'calib';
+type Mode = 'menu' | 'play' | 'pause' | 'end' | 'calib' | 'replay';
+/** what is being played: a song from the list, the song of the day, or Jam */
+type RunKind = 'song' | 'daily' | 'jam';
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -36,7 +41,10 @@ const debug = hash.has('debug') || !!hashBal;
 const autoSkill = hash.has('auto') ? parseFloat(hash.get('auto') || '0.85') : null;
 
 let mode: Mode = 'menu';
-let song: Song = SONGS[0];
+let song: Song = songById(meta.lastSong) ?? SONGS[0];
+let runKind: RunKind = 'song';
+let runSeed = 1;
+let lastEnd: EndInfo | null = null;
 let game: Game | null = null;
 let auto: Bot | null = null;
 let touchSeen = false;
@@ -47,7 +55,7 @@ let demoBot: Bot | null = null;
 let demoSeed = 1;
 
 const LAYER_NAMES: Record<LayerId, string> = {
-  hat: 'hi-hat', snare: 'werbel', pad: 'pad', arp: 'arpeggio', bass2: 'bas w szesnastkach', perc: 'perkusjonalia',
+  hat: 'hi-hat', snare: 'werbel', pad: 'pad', arp: 'arpeggio', bass2: 'bas w szesnastkach', perc: 'perkusjonalia', bells: 'dzwonki',
 };
 
 /** BAL for a level: defaults → test presets → #bal */
@@ -77,7 +85,7 @@ const input = new Input(canvas, {
 
 const ui = new UI(document.getElementById('ui')!, {
   play: () => start(),
-  again: () => start(),
+  again: () => start(runKind, runKind === 'daily' ? runSeed : undefined),
   pause: () => pause(),
   resume: () => resume(),
   menu: () => toMenu(),
@@ -108,6 +116,44 @@ const ui = new UI(document.getElementById('ui')!, {
     ui.calibValue(ms, (audio.latency() - audio.calib) * 1000);
   },
   calibDone: () => toMenu(),
+  songs: () => showSongs(),
+  album: (id) => {
+    meta.lastAlbum = id;
+    saveMeta(meta);
+    const a = ALBUMS.find((x) => x.id === id);
+    if (a && a.songs[0].kit !== song.kit) {
+      // the board behind the list takes the album's look
+      demoSong = a.songs[0];
+      demo = null;
+    }
+  },
+  pick: (id) => {
+    const sg = songById(id);
+    if (!sg) return;
+    song = sg;
+    meta.lastSong = sg.id;
+    saveMeta(meta);
+    start('song');
+  },
+  daily: () => {
+    const d = dailyPick(today());
+    song = d.song;
+    start('daily', d.seed);
+  },
+  jam: () => {
+    song = JAM;
+    start('jam');
+  },
+  next: () => {
+    const n = nextSong(meta, song);
+    if (!n) return;
+    song = n;
+    meta.lastSong = n.id;
+    saveMeta(meta);
+    start('song');
+  },
+  listen: () => listen(),
+  stopListen: () => stopListen(),
 });
 ui.setSound(meta.sound);
 
@@ -119,13 +165,37 @@ window.addEventListener('pointerdown', (e) => {
 
 // ------------------------------------------------------------ flow
 function songLine() {
-  const r = meta.songs[song.id];
+  const sg = songById(meta.lastSong) ?? SONGS[0];
+  const r = meta.songs[sg.id];
   const best = r?.best ? ` · rekord <b>${r.best.toLocaleString('pl-PL')}</b>` : '';
-  return `Utwór: <b>${song.title}</b> · ${song.bpm} BPM${best}`;
+  return `Ostatnio: <b>${sg.title}</b>${best} · ★ ${totalStars(meta)}`;
+}
+
+const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+
+function showSongs() {
+  mode = 'menu';
+  const albums: AlbumView[] = ALBUMS.map((a, ai) => ({
+    id: a.id, title: a.title, sub: a.sub, locked: !albumUnlocked(meta, ai),
+    lockNote: `Zalicz „${ALBUMS[ai - 1]?.songs[2]?.title ?? ''}”, żeby otworzyć album`,
+    songs: a.songs.map((sg, si) => {
+      const r = songRec(meta, sg.id);
+      return { id: sg.id, title: sg.title, meta: `${sg.bpm} BPM · ${fmtTime(sg.length)} · ${sg.layers.length} warstw`, stars: r.stars, best: r.best, locked: !songUnlocked(meta, ai, si) };
+    }),
+  }));
+  ui.showSongs(albums, meta.lastAlbum, totalStars(meta));
+}
+
+function modesLine() {
+  const d = dailyPick(today());
+  const done = meta.daily && meta.daily.date === today();
+  ui.setModes(done ? `${d.song.title} · ${meta.daily!.score.toLocaleString('pl-PL')} pkt` : `dziś: ${d.song.title}`,
+    meta.jamBest ? `bez końca · rekord ${meta.jamBest.toLocaleString('pl-PL')}` : 'bez końca, klocki spadają');
 }
 
 function toMenu() {
   mode = 'menu';
+  modesLine();
   audio.stopSong(0.3);
   if (audio.paused) audio.resume();
   game = null;
@@ -136,20 +206,24 @@ function toMenu() {
   ui.showMenu(sel, songLine(), meta.speed);
 }
 
-function start() {
+function start(kind: RunKind = runKind, seed = (Date.now() & 0xffff) + 1) {
   audio.unlock();
   if (audio.paused) audio.resume();
+  runKind = kind;
+  runSeed = seed;
   layers();
   ui.resetHud();
   renderer.clear();
-  game = new Game(song, (Date.now() & 0xffff) + 1);
+  game = new Game(song, seed, { endless: kind === 'jam' });
   auto = autoSkill !== null ? new Bot(autoSkill, 5) : null;
   audio.play(song, game);
   mode = 'play';
   ui.hideScreens();
   ui.hudVisible(true);
   input.enabled = true;
-  ui.titleCard(song.title, `${song.bpm} BPM`);
+  if (kind === 'jam') ui.titleCard('Jam', 'bez końca · klocki spadają');
+  else if (kind === 'daily') ui.titleCard(song.title, meta.daily?.date === today() ? 'utwór dnia · trening' : 'utwór dnia · liczy się pierwsza próba');
+  else ui.titleCard(song.title, `${song.bpm} BPM`);
   tipUntil = 0;
   hintStage = hintSeen('launch') ? (hintSeen('swing') ? 2 : 1) : 0;
   if (hintStage === 0) ui.hint(touchSeen ? 'Przesuwaj palcem, żeby sterować paletką. <b>Stuknij</b>, żeby wystrzelić piłkę.' : 'Mysz albo strzałki sterują paletką. <b>Klik</b> albo <b>spacja</b> wystrzeliwuje piłkę.');
@@ -350,6 +424,9 @@ function handleEvents(g: Game) {
         ui.pop('Druga piłka przejmuje', p.x, p.y, 'power');
         break;
       }
+      case 'push':
+        renderer.shakeBy(3);
+        break;
       case 'groove':
         ui.setGroove(e.on);
         break;
@@ -367,51 +444,108 @@ function endLevel(g: Game) {
   input.enabled = false;
   ui.hint(null);
   const broken = g.total - g.alive;
-  const pctB = Math.round((100 * broken) / g.total);
+  const pctB = Math.round((100 * broken) / Math.max(1, g.total));
   const st = g.stats;
   const rhythm = st.contacts ? Math.round((100 * (st.perfect + st.good)) / st.contacts) : 0;
-  const rec = meta.songs[song.id] ?? { best: 0, passed: false, cleared: false, plays: 0 };
-  const isBest = !auto && g.score > rec.best;
+  const score = Math.round(g.score);
+  const stars = runKind === 'jam' ? -1 : starsFor(g);
+  let isBest = false;
   if (!auto) {
-    rec.plays++;
-    if (isBest) rec.best = Math.round(g.score);
-    if (g.passed) rec.passed = true;
-    if (g.endReason === 'clear') rec.cleared = true;
-    meta.songs[song.id] = rec;
+    if (runKind === 'song') {
+      const r = songRec(meta, song.id);
+      isBest = score > r.best;
+      r.plays++;
+      if (isBest) r.best = score;
+      if (g.passed) r.passed = true;
+      if (g.endReason === 'clear') r.cleared = true;
+      r.stars = Math.max(r.stars, stars);
+      meta.songs[song.id] = r;
+    } else if (runKind === 'daily') {
+      // the first attempt of the day counts
+      if (!meta.daily || meta.daily.date !== today()) {
+        meta.daily = { date: today(), song: song.id, score };
+        isBest = true;
+      }
+    } else {
+      isBest = score > meta.jamBest;
+      if (isBest) meta.jamBest = score;
+    }
     saveMeta(meta);
     logPlay({
-      date: today(), song: song.id, reason: g.endReason ?? '', passed: g.passed, score: Math.round(g.score), time: Math.round(g.t),
+      date: today(), song: runKind === 'song' ? song.id : `${runKind}:${song.id}`, reason: g.endReason ?? '', passed: g.passed, score, time: Math.round(g.t),
       bricks: pctB, speed: meta.speed, perfect: st.perfect, good: st.good, catches: st.catches, lost: st.lost, bestStreak: st.bestStreak,
       test: testTag(sel), calib: Math.round(audio.calib * 1000),
     });
   }
   const barsLeft = Math.max(0, song.bars - Math.ceil(g.tempo.stepAt(st.clearT) / 16));
+  const jam = runKind === 'jam';
   const info: EndInfo = {
-    title: g.endReason === 'clear' ? 'Wszystko zbite!' : g.endReason === 'lives' ? 'Koniec żyć' : g.passed ? 'Utwór zaliczony' : 'Za mało klocków',
-    sub: g.endReason === 'clear' ? `Finał ${barsLeft} taktów przed końcem utworu` : g.endReason === 'lives' ? `Zbite ${pctB}% klocków`
-      : g.passed ? `Zbite ${pctB}% klocków` : `Potrzeba ${Math.round(BAL.passFrac * 100)}%, zbite ${pctB}%`,
-    passed: g.passed,
-    score: Math.round(g.score),
-    best: isBest,
+    title: jam ? 'Klocki dotarły na dół' : g.endReason === 'clear' ? 'Wszystko zbite!' : g.endReason === 'lives' ? 'Koniec żyć' : g.passed ? 'Utwór zaliczony' : 'Za mało klocków',
+    sub: jam ? `${g.jamRows} rzędów · ${Math.round(g.tempo.bpmAt(g.t))} BPM na koniec`
+      : g.endReason === 'clear' ? `Finał ${barsLeft} taktów przed końcem utworu` : g.endReason === 'lives' ? `Zbite ${pctB}% klocków`
+        : g.passed ? `Zbite ${pctB}% klocków` : `Potrzeba ${Math.round(BAL.passFrac * 100)}%, zbite ${pctB}%`,
+    passed: g.passed || (jam && score > 0),
+    score,
+    best: isBest && score > 0,
     rows: [
-      ['Klocki', pctB + '%'],
+      jam ? ['Klocki', String(broken)] : ['Klocki', pctB + '%'],
       ['W rytm', rhythm + '%'],
       ['Idealne', String(st.perfect)],
       ['Najdłuższa seria', String(st.bestStreak)],
     ],
+    stars,
+    canNext: runKind === 'song' && g.passed && !!nextSong(meta, song),
+    canListen: false,
   };
+  lastEnd = info;
   setTimeout(() => {
-    if (mode === 'end') ui.showEnd(info);
+    if (mode !== 'end') return;
+    info.canListen = !!audio.lastTake;
+    ui.showEnd(info);
   }, 500);
 }
 
+// ------------------------------------------------------------ "Twoja wersja"
+let replayRec: Recording | null = null;
+function listen() {
+  const r = audio.lastTake;
+  if (!r) return;
+  audio.unlock();
+  replayRec = r;
+  mode = 'replay';
+  renderer.clear();
+  audio.playReplay(r);
+  ui.showReplay(r.song.id === JAM.id ? 'Jam' : r.song.title);
+}
+function stopListen() {
+  audio.stopSong(0.3);
+  replayRec = null;
+  renderer.layersOverride = null;
+  mode = 'end';
+  if (lastEnd) ui.showEnd(lastEnd);
+}
+/** the replay's visuals: no game, the beat and layers from the recording */
+function replayBeat(r: Recording, dt: number): Beat {
+  const t = audio.now();
+  const st = Math.max(0, Math.floor(r.tempo.stepAt(t)));
+  const f = r.flags[Math.min(st, r.flags.length - 1)] ?? 0;
+  renderer.layersOverride = { n: f & 15, ids: r.song.layers };
+  const s = r.song;
+  const kick = t < 0 ? 0 : Math.exp(-since(r.tempo, s.kick, t) * 7);
+  const hat = (f & 15) > 0 ? Math.exp(-since(r.tempo, s.hat, t) * 12) : 0;
+  const snare = (f & 15) > 1 ? Math.exp(-since(r.tempo, s.snare, t) * 9) : 0;
+  liveSpectrum(kick, hat, snare, t);
+  grooveK += ((f & 16 ? 1 : 0) - grooveK) * damp(4, dt);
+  return { kick, snare, hat, bass: bandsNow.bass, mid: bandsNow.mid, high: bandsNow.high, energy: (f & 15) / s.layers.length, groove: grooveK, scroll: r.tempo.stepAt(t) / 4, spec };
+}
+
 // ------------------------------------------------------------ the music, for the visuals
-function since(g: Game, pat: string, t: number) {
-  const i = Math.floor(g.tempo.stepAt(t));
+function since(tempo: Tempo, pat: string, t: number) {
+  const i = Math.floor(tempo.stepAt(t));
   for (let k = 0; k < 32; k++) {
     const j = i - k;
     if (j < 0) break;
-    if (pat[((j % 16) + 16) % 16] !== '.') return t - g.tempo.timeAt(j);
+    if (pat[((j % 16) + 16) % 16] !== '.') return t - tempo.timeAt(j);
   }
   return 9;
 }
@@ -430,9 +564,17 @@ function beatOf(g: Game | null, dt: number, live: boolean): Beat {
   const over = t >= g.length;
   const all = g.dropping;
   const has = (id: LayerId) => (all || g.layers > s.layers.indexOf(id)) && t > g.tempo.timeAt(s.intro * 16);
-  const kick = over ? 0 : Math.exp(-since(g, s.kick, t) * 7);
-  const hat = has('hat') && !over ? Math.exp(-since(g, s.hat, t) * 12) : 0;
-  const snare = has('snare') && !over ? Math.exp(-since(g, s.snare, t) * 9) : 0;
+  const kick = over ? 0 : Math.exp(-since(g.tempo, s.kick, t) * 7);
+  const hat = has('hat') && !over ? Math.exp(-since(g.tempo, s.hat, t) * 12) : 0;
+  const snare = has('snare') && !over ? Math.exp(-since(g.tempo, s.snare, t) * 9) : 0;
+  liveSpectrum(kick, hat, snare, t, live);
+  grooveK += ((g.groove ? 1 : 0) - grooveK) * damp(4, dt);
+  return { kick, snare, hat, bass: bandsNow.bass, mid: bandsNow.mid, high: bandsNow.high, energy: all ? 1 : g.layers / s.layers.length, groove: grooveK, scroll: g.tempo.stepAt(t) / 4, spec };
+}
+
+const bandsNow = { bass: 0, mid: 0, high: 0 };
+/** bands and the 32-bin spectrum from the analyser (or faked from the drums without audio) */
+function liveSpectrum(kick: number, hat: number, snare: number, t: number, live = true) {
   let bass = kick * 0.5, mid = 0.3 * (snare + hat), high = hat * 0.6;
   if (live && audio.analyser && audio.running) {
     // 256 bins over 0..sampleRate/2: log-spaced groups for the skyline, three bands for the rest
@@ -453,8 +595,9 @@ function beatOf(g: Game | null, dt: number, live: boolean): Beat {
       spec[i] = Math.max(spec[i] * 0.85, clamp(v, 0, 1) * 255);
     }
   }
-  grooveK += ((g.groove ? 1 : 0) - grooveK) * damp(4, dt);
-  return { kick, snare, hat, bass, mid, high, energy: all ? 1 : g.layers / s.layers.length, groove: grooveK, scroll: g.tempo.stepAt(t) / 4, spec };
+  bandsNow.bass = bass;
+  bandsNow.mid = mid;
+  bandsNow.high = high;
 }
 
 // ------------------------------------------------------------ loop
@@ -463,6 +606,11 @@ const FREEZE_MS = 40;
 let freezeUntil = 0;
 let fps = 60;
 let slowFrames = 0;
+let fastFrames = 0;
+/** the menu's background game (an album tab can switch its look) */
+let demoSong: Song | null = null;
+// weaker phones start a notch lower; the loop adapts from there
+if (matchMedia('(pointer: coarse)').matches && (navigator.hardwareConcurrency || 4) <= 4) renderer.quality = 0.8;
 
 function frame(nowMs: number) {
   const now = nowMs / 1000;
@@ -499,11 +647,14 @@ function frame(nowMs: number) {
     ui.setFx(fxItems(game));
   } else if (mode === 'pause' && game) {
     shown = game;
+  } else if (mode === 'replay' && replayRec) {
+    ui.replayProgress(audio.replayProgress());
+    if (!audio.replaying) stopListen();
   } else {
     // menu / calibration: a silent demo game
     if (!demo || demo.phase === 'over') {
       layers();
-      demo = new Game(song, demoSeed++);
+      demo = new Game(demoSong ?? song, demoSeed++, { endless: (demoSong ?? song) === JAM });
       demoBot = new Bot(0.8, demoSeed * 7);
     }
     let left = dt;
@@ -518,7 +669,9 @@ function frame(nowMs: number) {
     calibCheck();
   }
 
-  renderer.render(shown, beatOf(shown, dt, mode === 'play'), sel.ring === 'on');
+  const kitNow = mode === 'replay' && replayRec ? replayRec.song.kit : (shown?.song.kit ?? song.kit);
+  const beat = mode === 'replay' && replayRec ? replayBeat(replayRec, dt) : beatOf(shown, dt, mode === 'play');
+  renderer.render(shown, beat, sel.ring === 'on', kitNow === 'lofi');
 
   // quality: drop the render scale if frames are slow for a while
   if (fps < 45) slowFrames++;
@@ -526,6 +679,14 @@ function frame(nowMs: number) {
   if (slowFrames > 90 && renderer.quality > 0.6) {
     renderer.quality = Math.max(0.6, renderer.quality - 0.15);
     slowFrames = 0;
+    fastFrames = 0;
+  }
+  // and give it back slowly when there is headroom
+  if (fps > 58) fastFrames++;
+  else fastFrames = 0;
+  if (fastFrames > 900 && renderer.quality < 1) {
+    renderer.quality = Math.min(1, renderer.quality + 0.1);
+    fastFrames = 0;
   }
 
   if (debug && game) {
@@ -549,4 +710,6 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   audio, renderer, BAL,
   auto: (s: number | null) => (auto = s === null ? null : new Bot(s, 3)),
   start,
+  get meta() { return meta; },
+  listen,
 };

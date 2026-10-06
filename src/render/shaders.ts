@@ -53,6 +53,7 @@ uniform sampler2D u_spec;  // 32 spectrum bins (R8)
 uniform vec4 u_field;      // playfield rect in pixels: x0, y0, x1, y1
 uniform float u_hz;        // horizon height (0..1 of the screen)
 uniform float u_detail;    // quality 0.5..1
+uniform float u_theme;     // 0 synthwave, 1 lo-fi (rainy city at dusk)
 out vec4 o;
 
 float ridge(float x, float s, float a){
@@ -70,6 +71,17 @@ void main(){
   float sunY = hz + .13;
   vec3 sunHot = mix(vec3(1., .72, .18), vec3(1., .9, .6), u_groove * .5);
 
+  bool lofi = u_theme > .5;
+  if (lofi) {
+    // lo-fi: a warmer, softer palette
+    pink = vec3(1., .42, .3);
+    violet = vec3(.22, .12, .3);
+    cyan = vec3(.35, .75, .8);
+    deep = vec3(.01, .014, .025);
+    sunY = hz + .1;
+    sunHot = vec3(1., .78, .5);
+  }
+
   if (p.y > hz) {
     float h = (p.y - hz) / (1. - hz);
     c = mix(pink * .2, violet * .08, smoothstep(0., .35, h));
@@ -81,7 +93,7 @@ void main(){
     vec2 sp = floor(fc / 3.);
     float st = hash12(sp);
     float tw = .5 + .5 * sin(u_time * 3. + st * 40.);
-    float dens = mix(.9975, .993, u_layA.x);
+    float dens = lofi ? 1.1 : mix(.9975, .993, u_layA.x);
     c += vec3(.8, .85, 1.) * step(dens, st) * (.25 + 1.1 * u_hat * tw * u_layA.x) * smoothstep(.12, .45, h);
 
     // pad: aurora ribbons drifting across the sky
@@ -119,8 +131,8 @@ void main(){
     float d = length(p - sc);
     float k = clamp((p.y - (sc.y - R)) / (2. * R), 0., 1.);
     vec3 sun = mix(vec3(1., .08, .35), sunHot, k) * (.5 + u_energy * .3 + u_kick * .3 + u_groove * .2);
-    float bands = step(.5, fract((p.y - hz) * 46. - u_time * .4)) + step(.55, k);
-    float inside = smoothstep(.003, -.003, d - R) * clamp(bands, 0., 1.);
+    float bands = lofi ? 1. : step(.5, fract((p.y - hz) * 46. - u_time * .4)) + step(.55, k);
+    float inside = smoothstep(lofi ? .02 : .003, lofi ? -.02 : -.003, d - R) * clamp(bands, 0., 1.) * (lofi ? .55 : 1.);
     c = mix(c, sun, inside);
     c += vec3(1., .2, .5) * exp(-max(d - R, 0.) * 9.) * (.1 + .15 * u_kick + .12 * u_energy);
 
@@ -135,16 +147,32 @@ void main(){
       c = mix(c, ec * (.35 + .7 * v), inBar * .8);
     }
 
-    // two ridges: far violet, near dark, both with a neon rim that glows with the mids
-    float x = p.x * 3.;
-    float m1 = hz + .006 + ridge(x, .7, .085) * (1. - .55 * smoothstep(.0, .25, .3 - abs(p.x)));
-    float m2 = hz + .002 + ridge(x + 40., 1.3, .055) * (1. - .7 * smoothstep(.0, .3, .38 - abs(p.x)));
-    float in1 = smoothstep(.0015, -.0015, p.y - m1);
-    float in2 = smoothstep(.0015, -.0015, p.y - m2);
-    c = mix(c, vec3(.05, .01, .09) + violet * .05 * (m1 - p.y) * 10., in1);
-    c += pink * exp(-abs(p.y - m1) * 500.) * (.25 + .5 * u_mid + .3 * u_kick) * (1. - in2);
-    c = mix(c, vec3(.012, .003, .025), in2);
-    c += cyan * exp(-abs(p.y - m2) * 600.) * (.2 + .4 * u_bass) * .8;
+    if (lofi) {
+      // a city skyline with lit windows, flickering a little with the hats
+      float bw = .045;
+      float bx = floor(p.x / bw);
+      float hb = hz + .015 + .1 * hash12(vec2(bx, 7.)) * (.45 + .55 * smoothstep(0., .45, abs(p.x))) + .02 * step(.8, hash12(vec2(bx, 3.)));
+      float inB = smoothstep(.0015, -.0015, p.y - hb);
+      vec3 bc = vec3(.02, .018, .03);
+      vec2 wcell = vec2(floor(p.x / bw * 4.), floor((p.y - hz) / .011));
+      vec2 wf = vec2(fract(p.x / bw * 4.), fract((p.y - hz) / .011));
+      float win = step(.62, hash12(wcell + bx * 3.1)) * step(.25, wf.x) * step(wf.x, .75) * step(.3, wf.y) * step(wf.y, .78);
+      win *= step(p.y, hb - .006);
+      bc += vec3(1., .7, .35) * win * (.25 + .15 * hash12(wcell) + .25 * u_hat * step(.9, hash12(wcell + 5.)));
+      c = mix(c, bc, inB);
+      c += pink * exp(-abs(p.y - hb) * 400.) * .08 * (1. - inB);
+    } else {
+      // two ridges: far violet, near dark, both with a neon rim that glows with the mids
+      float x = p.x * 3.;
+      float m1 = hz + .006 + ridge(x, .7, .085) * (1. - .55 * smoothstep(.0, .25, .3 - abs(p.x)));
+      float m2 = hz + .002 + ridge(x + 40., 1.3, .055) * (1. - .7 * smoothstep(.0, .3, .38 - abs(p.x)));
+      float in1 = smoothstep(.0015, -.0015, p.y - m1);
+      float in2 = smoothstep(.0015, -.0015, p.y - m2);
+      c = mix(c, vec3(.05, .01, .09) + violet * .05 * (m1 - p.y) * 10., in1);
+      c += pink * exp(-abs(p.y - m1) * 500.) * (.25 + .5 * u_mid + .3 * u_kick) * (1. - in2);
+      c = mix(c, vec3(.012, .003, .025), in2);
+      c += cyan * exp(-abs(p.y - m2) * 600.) * (.2 + .4 * u_bass) * .8;
+    }
   } else {
     // floor: a grid in perspective rolling towards us on the beat (its shape stays still)
     float dy = hz - p.y;
@@ -158,11 +186,28 @@ void main(){
     float line = max(lx * smoothstep(.6, .1, fw.x), ly * fade);
     vec3 lc = mix(cyan * 1.2, vec3(1., .2, .8), clamp(u_groove * .8 + u_bass * .25, 0., 1.));
     c = mix(vec3(.01, .002, .03), violet * .05, smoothstep(0., .3, dy));
+    if (lofi) {
+      // wet asphalt: faint lines, the windows' light smeared into long reflections
+      c = vec3(.008, .009, .014);
+      line *= .25;
+      float bx = floor(p.x / .045);
+      float refl = hash12(vec2(bx, 7.)) * (.5 + .5 * vnoise(dy * 40. + bx));
+      c += vec3(1., .65, .35) * refl * exp(-dy * 9.) * .07;
+    }
     c += lc * line * (.35 + .9 * u_kick + .6 * u_bass + u_layB.x * .7 * u_bass) * smoothstep(0., .04, dy);
     // the sun's reflection on the floor
     c += sunHot * exp(-abs(p.x) * 7.) * exp(-dy * 7.) * (.12 + .2 * u_kick) * (.6 + u_energy);
     // the horizon glows
     c += pink * exp(-dy * 40.) * (.5 + .4 * u_kick);
+  }
+  if (lofi) {
+    // rain, slanted, over everything
+    vec2 rp = vec2(p.x * 70. + p.y * 9., p.y * 2.2 + u_time * 2.6);
+    float col = floor(rp.x);
+    float rr = hash12(vec2(col, 1.7));
+    float yy = fract(rp.y + rr * 7.);
+    float streak = step(.55, rr) * smoothstep(0., .03, yy) * smoothstep(.16, .05, yy) * smoothstep(.22, .0, abs(fract(rp.x) - .5));
+    c += vec3(.55, .6, .75) * streak * .07;
   }
   // the playfield sits on a darker glass pane so the bricks read clearly
   vec4 f = u_field;
@@ -342,6 +387,7 @@ uniform float u_zoom;      // camera breathing with the beat (1 = still)
 uniform vec2 u_shake;      // px
 uniform float u_glitch;    // 0..1 slices shifted sideways (lost ball)
 uniform float u_dim;       // 0..1 the Filtr brick: the picture sinks with the sound
+uniform float u_theme;     // lo-fi: warmer, grainier
 out vec4 o;
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14), 0., 1.); }
 void main(){
@@ -377,6 +423,7 @@ void main(){
   // faint scanlines
   c *= .96 + .04 * sin(gl_FragCoord.y * 1.7);
   c = pow(max(c, 0.), vec3(1. / 2.2));
-  c += (hash12(gl_FragCoord.xy + fract(u_time * 7.3) * 311.) - .5) * .03;
+  c = mix(c, c * vec3(1.06, 1., .9) + vec3(.012, .008, 0.), u_theme);
+  c += (hash12(gl_FragCoord.xy + fract(u_time * 7.3) * 311.) - .5) * mix(.03, .065, u_theme);
   o = vec4(c, 1.);
 }`;

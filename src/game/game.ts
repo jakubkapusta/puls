@@ -37,6 +37,8 @@ export type Brick = {
   hitT: number;
   /** when it broke (game time), for the shatter animation */
   diedT: number;
+  /** Jam: when it slid one row down (the renderer eases it) */
+  slideT: number;
 };
 
 /** what broke a brick */
@@ -48,12 +50,13 @@ export type Power = { id: number; kind: PowerId; x: number; y: number };
 export type Shot = { x: number; y: number };
 
 export type Judge = 'perfect' | 'good';
-export type EndReason = 'clear' | 'song' | 'lives';
+export type EndReason = 'clear' | 'song' | 'lives' | 'jam';
 
 export type GameEvent =
   | { type: 'brick'; brick: Brick; midi: number; chord: number[] | null; broken: boolean; heat: number; pierce: boolean; src: HitSrc; x: number; y: number }
   | { type: 'special'; special: SpecialId; brick: Brick }
-  | { type: 'row'; row: number; layers: number }
+  | { type: 'row'; row: number; y: number; layers: number }
+  | { type: 'push' }
   | { type: 'layer'; layers: number }
   | { type: 'contact'; x: number; y: number }
   | { type: 'judge'; judge: Judge; x: number; y: number; mult: number; heat: number }
@@ -165,13 +168,93 @@ export class Game {
 
   private events: GameEvent[] = [];
 
-  constructor(song: Song, seed = 1) {
+  /** Jam: endless, rows generated and pushed down */
+  readonly endless: boolean;
+  private rowSeq = 0;
+  private nextPush = 0;
+  private nextTempoUp = 0;
+  private melody = 4;
+  private byId = new Map<number, Brick>();
+  jamRows = 0;
+
+  constructor(song: Song, seed = 1, opts: { endless?: boolean } = {}) {
     this.song = song;
     this.rng = makeRng(seed);
     this.tempo = new Tempo(song.s16);
+    this.endless = !!opts.endless;
     this.speed = this.baseSpeed();
-    this.buildBricks();
+    if (this.endless) {
+      for (let i = 0; i < BAL.jam.startRows; i++) this.jamRow(BAL.field.bricksTop - BAL.field.brickH / 2 - (BAL.jam.startRows - 1 - i) * BAL.field.rowPitch);
+      this.nextPush = (song.intro + BAL.jam.pushBars) * 16;
+      this.nextTempoUp = BAL.jam.tempoEvery * 16;
+    } else this.buildBricks();
+    for (const b of this.bricks) this.byId.set(b.id, b);
     this.placeOnPaddle();
+  }
+
+  /** how many rows the colours spread over */
+  get rowCount() {
+    return this.endless ? 10 : this.song.rows.length;
+  }
+
+  /** Jam: a generated row at height y — a melodic random walk, a few gaps, hard and special bricks */
+  private jamRow(y: number) {
+    const J = BAL.jam, F = BAL.field;
+    const left = (FIELD_W - F.colPitch * 8) / 2;
+    const r = this.rowSeq++;
+    const rowUp = (r * 3) % 10;
+    this.rowAlive[r] = 0;
+    const kinds: SpecialId[] = ['chord', 'perc', 'arp', 'filter', 'echo', 'drop', 'drop'];
+    for (let c = 0; c < 8; c++) {
+      if (this.rng() < J.gap) continue;
+      this.melody = clamp(this.melody + Math.round((this.rng() - 0.5) * 3), 2, 12);
+      const hard = this.rng() < J.hard;
+      const special = !hard && this.rng() < J.special ? kinds[Math.floor(this.rng() * kinds.length)] : null;
+      const hp = hard ? BAL.hard.hp : 1;
+      const id = this.nextId++;
+      const b: Brick = {
+        id, row: r, rowUp, col: c, x: left + F.colPitch * (c + 0.5), y, w: F.brickW, h: F.brickH,
+        step: 4 + this.melody, kind: hard ? 'hard' : 'normal', special, hp, maxHp: hp, alive: true, diedT: -9, hitT: -9, slideT: -9,
+      };
+      if (special === 'drop') {
+        this.dropTotal++;
+        this.dropLeft++;
+      }
+      this.bricks.push(b);
+      this.byId.set(id, b);
+      this.rowAlive[r]++;
+      this.alive++;
+      this.total++;
+    }
+  }
+
+  /** Jam: on the bar line everything slides a row down and a new row appears on top */
+  private stepJam() {
+    const J = BAL.jam, F = BAL.field;
+    const st = this.tempo.stepAt(this.t);
+    if (st >= this.nextTempoUp) {
+      this.nextTempoUp += J.tempoEvery * 16;
+      if (this.tempoFactor < J.maxFactor) {
+        this.tempoFactor = Math.min(J.maxFactor, this.tempoFactor * (1 + J.tempoStep));
+        this.retempo();
+      }
+    }
+    if (st < this.nextPush) return;
+    // the rows come faster as the jam goes on: every pushBars bars, one bar less every `faster` rows
+    this.nextPush += Math.max(J.minBars, J.pushBars - Math.floor(this.jamRows / J.faster)) * 16;
+    // keep the list short: forget bricks that broke a while ago
+    this.bricks = this.bricks.filter((b) => b.alive || this.t - b.diedT < 1);
+    for (const b of this.bricks) {
+      if (!b.alive) continue;
+      b.y -= F.rowPitch;
+      b.slideT = this.t;
+    }
+    this.jamRow(F.bricksTop - F.brickH / 2);
+    this.jamRows++;
+    this.needPlan = true;
+    this.sync = null;
+    this.emit({ type: 'push' });
+    if (this.bricks.some((b) => b.alive && b.y - b.h / 2 < J.dangerY)) this.finish('jam', false, this.tempo.s16At(this.t) * 8);
   }
 
   // ------------------------------------------------------------ setup
@@ -189,13 +272,13 @@ export class Game {
         // digits: normal bricks; letters a–i: hard bricks with notes 1–9
         const hard = ch >= 'a' && ch <= 'i';
         const deg = hard ? ch.charCodeAt(0) - 96 : parseInt(ch, 10);
-        const hp = hard ? BAL.hard.hp : 1;
+        const hp = hard ? s.hardHp ?? BAL.hard.hp : 1;
         const special = hard ? null : SPECIAL_CHARS[s.specials?.[r]?.[c] ?? '.'] ?? null;
         this.bricks.push({
           id: id++, row: r, rowUp, col: c,
           x: left + F.colPitch * (c + 0.5), y: F.bricksTop - F.brickH / 2 - r * F.rowPitch,
           w: F.brickW, h: F.brickH, step: s.rowBase + rowUp * s.rowStep + deg - 1,
-          kind: hard ? 'hard' : 'normal', special, hp, maxHp: hp, alive: true, diedT: -9, hitT: -9,
+          kind: hard ? 'hard' : 'normal', special, hp, maxHp: hp, alive: true, diedT: -9, hitT: -9, slideT: -9,
         });
         if (special === 'drop') this.dropTotal++;
         this.rowAlive[r]++;
@@ -331,6 +414,8 @@ export class Game {
     }
     if (this.phase !== 'play') return;
 
+    if (this.endless) this.stepJam();
+    if (this.phase !== 'play') return;
     this.stepArp();
     this.stepExtras(dt);
     this.stepPowers(dt);
@@ -512,9 +597,13 @@ export class Game {
     else if (src !== 'laser') this.maybePower(b);
     if (--this.rowAlive[b.row] === 0) {
       this.layers = Math.min(s.layers.length, this.layers + 1);
-      this.emit({ type: 'row', row: b.row, layers: this.layers });
+      this.emit({ type: 'row', row: b.row, y: b.y, layers: this.layers });
     }
-    if (this.alive === 0) {
+    if (this.alive === 0 && this.endless) {
+      // Jam: an empty board is just a bonus and the next row comes at once
+      this.add(BAL.score.barLeft * 10 * this.mult);
+      this.nextPush = Math.ceil(this.tempo.stepAt(this.t) / 16) * 16;
+    } else if (this.alive === 0) {
       // the finale: lands on the next downbeat and rings for a bar
       const next = this.tempo.nextBar(this.t, 0.05);
       const barsLeft = Math.max(0, s.bars - next / 16);
@@ -587,6 +676,8 @@ export class Game {
           this.dropAt = this.tempo.timeAt(at);
           this.dropUntil = this.tempo.timeAt(at + BAL.drop.bars * 16);
           this.stats.drops++;
+          // a new set can arm the next drop (Jam)
+          this.dropTotal = 0;
           this.emit({ type: 'drop', atStep: at });
         }
         break;
@@ -614,7 +705,7 @@ export class Game {
     if (!due.length) return;
     this.arpQueue = this.arpQueue.filter((q) => q.at > this.t);
     for (const q of due) {
-      const b = this.bricks[q.id];
+      const b = this.byId.get(q.id);
       if (b?.alive) this.damage(b, false, 'arp', b.x, b.y);
       if (this.phase !== 'play') return;
     }

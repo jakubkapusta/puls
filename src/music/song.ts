@@ -1,7 +1,9 @@
 // A song is data: tempo, scale, chord loop, the brick layout (rows = melody phrases) and the
 // patterns of the layers the player unlocks. No audio files — the engine synthesizes everything.
 
-export type LayerId = 'hat' | 'snare' | 'pad' | 'arp' | 'perc' | 'bass2';
+export type LayerId = 'hat' | 'snare' | 'pad' | 'arp' | 'perc' | 'bass2' | 'bells';
+/** the sound and look of an album */
+export type Kit = 'synth' | 'lofi';
 
 export type Chord = {
   /** semitones above the song root */
@@ -13,6 +15,11 @@ export type Chord = {
 export type SongDef = {
   id: string;
   title: string;
+  /** album id and the sound/look (see albums.ts) */
+  album: string;
+  kit: Kit;
+  /** delay of every odd 16th, as a fraction of a 16th (lo-fi swing) */
+  swing?: number;
   bpm: number;
   /** MIDI note of the tonic (bass register) */
   root: number;
@@ -22,6 +29,8 @@ export type SongDef = {
   chords: Chord[];
   /** length in bars (the level ends with the song) */
   bars: number;
+  /** hits a hard brick takes in this song (BAL.hard.hp if missing) */
+  hardHp?: number;
   /** bars at the start with only the base layer opening up */
   intro: number;
   /**
@@ -49,6 +58,8 @@ export type SongDef = {
   bass: string;
   /** arpeggio: chord tone index per 16th ('0'–'5', wraps up an octave), '.' rest */
   arp: string;
+  /** bells layer: chord tone index per 16th like `arp` */
+  bells?: string;
   /**
    * The lead hook, played while the player is "w rytmie": one 16-char bar per chord bar,
    * scale steps above `leadBase` ('0'–'9', 'a'–'c' for 10–12), '-' hold, '.' rest.
