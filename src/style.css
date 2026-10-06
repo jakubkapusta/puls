@@ -135,6 +135,8 @@ button, .clickable, input, summary { pointer-events: auto; }
 .note { margin: 4px 0 0; color: var(--dim); font-size: 12.5px; line-height: 1.4; }
 .song-line { font-size: 13px; color: var(--dim); }
 .song-line b { color: var(--ink); font-weight: 600; }
+.speed { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); }
+.speed small { color: var(--gold); font-size: 11px; }
 .row-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 
 .btn {

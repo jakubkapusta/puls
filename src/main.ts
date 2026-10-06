@@ -9,7 +9,7 @@ import { Game } from './game/game';
 import { BAL, mergeBal, resetBal } from './game/balance';
 import { Input } from './game/input';
 import { UI, type EndInfo } from './ui/ui';
-import { applyTest, fullSel, testTag, type TestSel } from './game/tuning';
+import { applySpeed, applyTest, fullSel, testTag, type TestSel } from './game/tuning';
 import { hintSeen, loadMeta, logPlay, markHint, saveMeta, today } from './game/save';
 import { Bot } from './sim/bot';
 import { SONGS } from './music/songs';
@@ -54,6 +54,7 @@ const LAYER_NAMES: Record<LayerId, string> = {
 function layers() {
   resetBal();
   applyTest(sel);
+  applySpeed(meta.speed);
   if (hashBal) mergeBal(hashBal);
   input.swingMode = sel.swing;
 }
@@ -85,6 +86,11 @@ const ui = new UI(document.getElementById('ui')!, {
     audio.setEnabled(on);
     meta.sound = on;
     saveMeta(meta);
+  },
+  speed: (id) => {
+    meta.speed = id;
+    saveMeta(meta);
+    layers();
   },
   test: (s) => {
     sel = s;
@@ -126,7 +132,7 @@ function toMenu() {
   input.enabled = false;
   ui.hint(null);
   ui.setGroove(false);
-  ui.showMenu(sel, songLine());
+  ui.showMenu(sel, songLine(), meta.speed);
 }
 
 function start() {
@@ -284,7 +290,7 @@ function endLevel(g: Game) {
     saveMeta(meta);
     logPlay({
       date: today(), song: song.id, reason: g.endReason ?? '', passed: g.passed, score: Math.round(g.score), time: Math.round(g.t),
-      bricks: pctB, perfect: st.perfect, good: st.good, catches: st.catches, lost: st.lost, bestStreak: st.bestStreak,
+      bricks: pctB, speed: meta.speed, perfect: st.perfect, good: st.good, catches: st.catches, lost: st.lost, bestStreak: st.bestStreak,
       test: testTag(sel), calib: Math.round(audio.calib * 1000),
     });
   }

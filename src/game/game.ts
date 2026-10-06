@@ -193,6 +193,10 @@ export class Game {
     return e;
   }
 
+  private add(points: number) {
+    this.score += points * BAL.score.speedMul;
+  }
+
   private emit(e: GameEvent) {
     this.events.push(e);
   }
@@ -238,7 +242,7 @@ export class Game {
     this.sync = null;
     this.landing = null;
     this.endAt = this.t + delay;
-    if (passed) this.score += this.lives * BAL.score.lifeLeft;
+    if (passed) this.add(this.lives * BAL.score.lifeLeft);
   }
 
   private doSwing(ts: number) {
@@ -364,7 +368,7 @@ export class Game {
       this.stats.pierced++;
       this.needPlan = true;
     }
-    this.score += (broken ? BAL.score.brick : BAL.score.hardHit) * (1 + this.heat * BAL.score.heatBrick) * this.mult;
+    this.add((broken ? BAL.score.brick : BAL.score.hardHit) * (1 + this.heat * BAL.score.heatBrick) * this.mult);
     this.emit({ type: 'brick', brick: b, midi, broken, heat: this.heat, pierce, x: this.bx, y: this.by });
     if (!broken) return;
     if (--this.rowAlive[b.row] === 0) {
@@ -375,7 +379,7 @@ export class Game {
       // the finale: lands on the next downbeat and rings for a bar
       const nextBar = Math.ceil((this.t + 0.05) / s.bar) * s.bar;
       const barsLeft = Math.max(0, Math.floor((s.length - nextBar) / s.bar));
-      this.score += barsLeft * BAL.score.barLeft * this.mult;
+      this.add(barsLeft * BAL.score.barLeft * this.mult);
       this.stats.clearT = this.t;
       this.finish('clear', true, nextBar - this.t + s.bar);
       this.emit({ type: 'clear' });
@@ -421,7 +425,7 @@ export class Game {
     this.mult = Math.min(H.multMax, this.mult + 1);
     this.streak++;
     this.stats.bestStreak = Math.max(this.stats.bestStreak, this.streak);
-    this.score += (judge === 'perfect' ? BAL.score.perfect : BAL.score.good) * this.mult;
+    this.add((judge === 'perfect' ? BAL.score.perfect : BAL.score.good) * this.mult);
     // the ball leaves hotter
     if (!this.onPaddle) this.speed = this.baseSpeed();
     this.emit({ type: 'judge', judge, x, y, mult: this.mult, heat: this.heat });

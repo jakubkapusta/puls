@@ -1,6 +1,6 @@
 // Persistence. Every read and write is wrapped: storage can be missing, full or blocked.
 
-import type { TestSel } from './tuning';
+import type { SpeedId, TestSel } from './tuning';
 
 export type SongRec = { best: number; passed: boolean; cleared: boolean; plays: number };
 export type Meta = {
@@ -9,11 +9,12 @@ export type Meta = {
   /** extra audio latency from the calibration (s); null = never calibrated */
   calib: number | null;
   test: Partial<TestSel> | null;
+  speed: SpeedId;
   songs: Record<string, SongRec>;
 };
 export type PlayStat = {
   date: string; song: string; reason: string; passed: boolean; score: number; time: number;
-  bricks: number; perfect: number; good: number; catches: number; lost: number; bestStreak: number; test: string; calib: number;
+  bricks: number; speed: string; perfect: number; good: number; catches: number; lost: number; bestStreak: number; test: string; calib: number;
 };
 
 const KEY_META = 'puls.meta.v1';
@@ -36,7 +37,7 @@ function write(key: string, v: unknown) {
 
 export function loadMeta(): Meta {
   const m = read<Partial<Meta>>(KEY_META);
-  return { v: 1, sound: m?.sound ?? true, calib: m?.calib ?? null, test: m?.test ?? null, songs: m?.songs ?? {} };
+  return { v: 1, sound: m?.sound ?? true, calib: m?.calib ?? null, test: m?.test ?? null, speed: m?.speed === 'fast' ? 'fast' : 'mid', songs: m?.songs ?? {} };
 }
 export const saveMeta = (m: Meta) => write(KEY_META, m);
 

@@ -1,23 +1,27 @@
-// M1 test settings ("Ustawienia testowe" in the menu): a few feel options for the owner's phone
-// test. Each option overrides some BAL knobs; the defaults must equal balance.ts.
+// Settings that change BAL. `SPEEDS` is a player choice in the menu (owner after the M1 test:
+// medium and fast both fine, fast should pay more). `TEST_GROUPS` are the "Ustawienia testowe"
+// feel options; each overrides some BAL knobs and the defaults must equal balance.ts.
 
 import { BAL } from './balance';
 import type { SwingMode } from './input';
 
-export type TestSel = { speed: string; window: string; sync: string; swing: SwingMode; ring: string };
+export type TestSel = { window: string; sync: string; swing: SwingMode; ring: string };
+
+export type SpeedId = 'mid' | 'fast';
+export const SPEEDS: Record<SpeedId, { label: string; speed: number; mul: number }> = {
+  mid: { label: 'średnia', speed: 800, mul: 1 },
+  fast: { label: 'szybka', speed: 920, mul: 1.25 },
+};
+export function applySpeed(id: SpeedId) {
+  const s = SPEEDS[id] ?? SPEEDS.mid;
+  BAL.ball.speed = s.speed;
+  BAL.score.speedMul = s.mul;
+}
 
 type Opt = { id: string; label: string; apply?: () => void };
 export type TestGroup = { key: keyof TestSel; label: string; def: string; opts: Opt[] };
 
 export const TEST_GROUPS: TestGroup[] = [
-  {
-    key: 'speed', label: 'Piłka', def: 'mid',
-    opts: [
-      { id: 'slow', label: 'wolna', apply: () => (BAL.ball.speed = 680) },
-      { id: 'mid', label: 'średnia', apply: () => (BAL.ball.speed = 800) },
-      { id: 'fast', label: 'szybka', apply: () => (BAL.ball.speed = 920) },
-    ],
-  },
   {
     key: 'window', label: 'Okno uderzenia', def: 'mid',
     opts: [
@@ -42,7 +46,7 @@ export const TEST_GROUPS: TestGroup[] = [
     ],
   },
   {
-    key: 'ring', label: 'Pierścień lądowania', def: 'on',
+    key: 'ring', label: 'Pierścień lądowania', def: 'off',
     opts: [
       { id: 'on', label: 'tak' },
       { id: 'off', label: 'nie' },

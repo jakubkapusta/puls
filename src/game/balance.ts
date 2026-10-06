@@ -74,6 +74,8 @@ export const BAL = {
     hp: 3,
   },
   score: {
+    /** every score × this (the fast ball pays more) */
+    speedMul: 1,
     brick: 100,
     hardHit: 40,
     perfect: 150,

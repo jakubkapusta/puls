@@ -2,7 +2,7 @@
 // so they never catch taps.
 
 import type { Game } from '../game/game';
-import { TEST_GROUPS, type TestSel } from '../game/tuning';
+import { SPEEDS, TEST_GROUPS, type SpeedId, type TestSel } from '../game/tuning';
 
 export type UIHandlers = {
   play: () => void;
@@ -12,6 +12,7 @@ export type UIHandlers = {
   again: () => void;
   sound: (on: boolean) => void;
   test: (sel: TestSel) => void;
+  speed: (id: SpeedId) => void;
   calibOpen: () => void;
   calibStart: () => void;
   calibTap: (ms: number) => void;
@@ -66,6 +67,7 @@ export class UI {
           <p class="tag">Każdy klocek jest nutą. Utwór powstaje z tego, jak grasz.</p>
           <button class="btn primary play">Graj</button>
           <div class="song-line"></div>
+          <div class="speed"><span>Piłka</span><div class="chips speed-chips"></div></div>
           <div class="row-btns">
             <button class="btn small calib-open">Kalibracja dźwięku</button>
             <button class="btn small sound-btn"></button>
@@ -161,12 +163,28 @@ export class UI {
     for (const s of [this.menu, this.pauseEl, this.end, this.calib]) s.classList.toggle('show', s === el);
   }
 
-  showMenu(sel: TestSel, songLine: string) {
+  showMenu(sel: TestSel, songLine: string, speed: SpeedId) {
     this.sel = sel;
+    this.buildSpeed(speed);
     this.show(this.menu);
     this.hudVisible(false);
     $(this.root, '.song-line').innerHTML = songLine;
     this.buildTest();
+  }
+
+  private buildSpeed(cur: SpeedId) {
+    const box = $(this.root, '.speed-chips');
+    box.innerHTML = (Object.keys(SPEEDS) as SpeedId[]).map((id) => {
+      const s = SPEEDS[id];
+      const extra = s.mul > 1 ? ` <small>+${Math.round((s.mul - 1) * 100)}% pkt</small>` : '';
+      return `<button class="chip${id === cur ? ' on' : ''}" data-v="${id}">${s.label}${extra}</button>`;
+    }).join('');
+    box.querySelectorAll<HTMLButtonElement>('.chip').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = b.dataset.v as SpeedId;
+      this.buildSpeed(id);
+      this.h.speed(id);
+    }));
   }
 
   private buildTest() {
