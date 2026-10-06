@@ -16,6 +16,11 @@ export type Theme = {
   rows: [RGB, RGB, RGB];
   /** warmth, extra grain, pixel size in css px (0 = off), strobe strength on the kick */
   post: [number, number, number, number];
+  /** neon frame of the board and the paddle (optional: synthwave violet / cyan) */
+  frame?: RGB;
+  paddle?: RGB;
+  /** how fast the floor rolls (grid cells per beat) */
+  scroll?: number;
 };
 
 export const THEMES: Record<Kit, Theme> = {
@@ -30,6 +35,8 @@ export const THEMES: Record<Kit, Theme> = {
     look: [1, 1, 0, 0.55], look2: [0, 0, 1, 0],
     rows: [[0.3, 0.8, 0.8], [1.25, 0.8, 0.4], [1.2, 0.42, 0.5]],
     post: [1, 0.035, 0, 0],
+    frame: [0.9, 0.5, 0.35],
+    paddle: [1.3, 0.9, 0.55],
   },
   // primary colours, a big blocky sun, everything in fat pixels
   chip: {
@@ -58,5 +65,8 @@ export const THEMES: Record<Kit, Theme> = {
     look: [0, 0, 1, 0.6], look2: [0, 1, 1, 1],
     rows: [[0.2, 1.1, 0.8], [0.4, 0.6, 1.4], [0.9, 1.3, 0.4]],
     post: [0, 0.015, 0, 0],
+    frame: [0.15, 0.9, 0.7],
+    paddle: [0.5, 1.4, 1.1],
+    scroll: 2,
   },
 };

@@ -150,8 +150,8 @@ void main(){
       float ly = floor(p.y * 220.);
       float rs = hash12(vec2(ly, 3.));
       float xx = fract(p.x * .35 + u_time * (1.2 + rs * 2.5) + rs * 9.);
-      float streak = step(.93, rs) * smoothstep(0., .25, xx) * smoothstep(.45, .25, xx) * smoothstep(.1, .5, h);
-      c += cyan * streak * (.25 + .4 * u_hat);
+      float streak = step(.9, rs) * smoothstep(0., .3, xx) * smoothstep(.5, .3, xx) * smoothstep(.05, .4, h);
+      c += cyan * streak * (.35 + .6 * u_hat + .3 * u_energy);
     }
 
     // perc: a spectrum skyline on the horizon, mirrored around the centre

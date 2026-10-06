@@ -19,11 +19,10 @@ export function starsFor(g: Game) {
 
 export const rec = (m: Meta, id: string): SongRec => m.songs[id] ?? { best: 0, passed: false, cleared: false, plays: 0, stars: 0 };
 
-/** the Lo-fi album opens when the third synthwave song is passed */
+/** an album opens when its `after` song is passed (Lo-fi after Kaseta, D&B after Laserowy horyzont) */
 export function albumUnlocked(m: Meta, albumIdx: number) {
-  if (albumIdx === 0 || ALBUMS[albumIdx].lab) return true;
-  const prev = ALBUMS[albumIdx - 1];
-  return rec(m, prev.songs[Math.min(2, prev.songs.length - 1)].id).passed;
+  const a = ALBUMS[albumIdx];
+  return !a.after || !!a.lab || rec(m, a.after).passed;
 }
 
 /** songs open in order inside an album */
@@ -38,7 +37,7 @@ export function nextSong(m: Meta, song: Song): Song | null {
     if (i < 0) continue;
     if (ALBUMS[a].lab) return null;
     if (i + 1 < ALBUMS[a].songs.length) return songUnlocked(m, a, i + 1) ? ALBUMS[a].songs[i + 1] : null;
-    return a + 1 < ALBUMS.length && !ALBUMS[a + 1].lab && albumUnlocked(m, a + 1) ? ALBUMS[a + 1].songs[0] : null;
+    return null;
   }
   return null;
 }

@@ -181,7 +181,7 @@ function showSongs() {
   mode = 'menu';
   const albums: AlbumView[] = ALBUMS.map((a, ai) => ({
     id: a.id, title: a.title, sub: a.sub, locked: !albumUnlocked(meta, ai), lab: a.lab,
-    lockNote: `Zalicz „${ALBUMS[ai - 1]?.songs[2]?.title ?? ''}”, żeby otworzyć album`,
+    lockNote: `Zalicz „${songById(a.after ?? '')?.title ?? ''}”, żeby otworzyć album`,
     songs: a.songs.map((sg, si) => {
       const r = songRec(meta, sg.id);
       const m = a.lab ? `${KIT_NAMES[sg.kit]} · ${sg.bpm} BPM · ${fmtTime(sg.length)}` : `${sg.bpm} BPM · ${fmtTime(sg.length)} · ${sg.layers.length} warstw`;

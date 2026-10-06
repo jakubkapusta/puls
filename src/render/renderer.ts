@@ -364,7 +364,7 @@ export class Renderer {
     // the laser fan counts 16ths: pass the step as "time" with a 16th of 1
     const step16 = g ? Math.max(0, g.tempo.stepAt(g.t)) : this.time / 0.15;
     this.pBg.use().f2('u_res', this.W, this.H).f1('u_time', this.time).f1('u_songT', step16).f1('u_s16', 1)
-      .f1('u_scroll', beat.scroll).f1('u_kick', beat.kick).f1('u_snare', beat.snare).f1('u_hat', beat.hat)
+      .f1('u_scroll', beat.scroll * (theme.scroll ?? 1)).f1('u_kick', beat.kick).f1('u_snare', beat.snare).f1('u_hat', beat.hat)
       .f1('u_bass', beat.bass).f1('u_mid', beat.mid).f1('u_high', beat.high).f1('u_energy', beat.energy).f1('u_groove', beat.groove)
       .f4('u_layA', this.lay[0], this.lay[1], this.lay[2], this.lay[3]).f2('u_layB', this.lay[4], this.lay[5])
       .tex('u_spec', 0, this.specTex)
@@ -405,7 +405,8 @@ export class Renderer {
   /** neon walls around the playfield */
   private frame(beat: Beat) {
     const k = 0.35 + beat.kick * 0.5 + beat.groove * 0.4;
-    const c: RGB = beat.groove > 0.5 ? [1.2 * k, 0.25 * k, 0.9 * k] : [0.5 * k, 0.25 * k, 1.3 * k];
+    const f = theme.frame ?? [0.5, 0.25, 1.3];
+    const c: RGB = beat.groove > 0.5 ? [1.2 * k, 0.25 * k, 0.9 * k] : [f[0] * k, f[1] * k, f[2] * k];
     this.box(-3, FIELD_H / 2, 2, FIELD_H / 2, 2, 0, 10, 0, c, 1);
     this.box(FIELD_W + 3, FIELD_H / 2, 2, FIELD_H / 2, 2, 0, 10, 0, c, 1);
     this.box(FIELD_W / 2, FIELD_H + 3, FIELD_W / 2 + 5, 2, 2, 0, 10, 0, c, 1);
@@ -486,7 +487,7 @@ export class Renderer {
     const P = BAL.paddle;
     const lift = g.lift();
     const swingK = clamp(lift / P.swingLift, 0, 1);
-    const pc: RGB = g.groove ? [1.5, 0.45, 1.5] : [0.3, 1.1, 1.5];
+    const pc: RGB = g.groove ? [1.5, 0.45, 1.5] : theme.paddle ?? [0.3, 1.1, 1.5];
     const pk = 1 + swingK * 0.5 + beat.kick * 0.2;
     const py = P.y + lift;
     const pw = g.paddleW;
