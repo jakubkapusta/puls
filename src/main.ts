@@ -129,6 +129,7 @@ function toMenu() {
   audio.stopSong(0.3);
   if (audio.paused) audio.resume();
   game = null;
+  renderer.clear();
   input.enabled = false;
   ui.hint(null);
   ui.setGroove(false);
@@ -140,6 +141,7 @@ function start() {
   if (audio.paused) audio.resume();
   layers();
   ui.resetHud();
+  renderer.clear();
   game = new Game(song, (Date.now() & 0xffff) + 1);
   auto = autoSkill !== null ? new Bot(autoSkill, 5) : null;
   audio.play(song, game);
@@ -244,6 +246,7 @@ function handleEvents(g: Game) {
     hintOnEvent(e.type);
     switch (e.type) {
       case 'judge': {
+        if (e.judge === 'perfect') freezeUntil = performance.now() + FREEZE_MS;
         const p = renderer.toCss(e.x, e.y + 60);
         ui.pop(e.judge === 'perfect' ? 'Idealnie' : 'Dobrze', p.x, p.y, e.judge);
         break;
@@ -325,28 +328,50 @@ function since(s: Song, pat: string, t: number) {
   return 9;
 }
 const freq = new Uint8Array(256);
+const spec = new Uint8Array(32);
 let grooveK = 0;
+const band = (lo: number, hi: number) => {
+  let sum = 0;
+  for (let i = lo; i < hi; i++) sum += freq[i];
+  return sum / (hi - lo) / 255;
+};
 function beatOf(g: Game | null, dt: number, live: boolean): Beat {
-  if (!g || g.t < 0) return { kick: 0, hat: 0, bass: 0, energy: 0, groove: 0, scroll: 0 };
+  if (!g || g.t < 0) return { kick: 0, snare: 0, hat: 0, bass: 0, mid: 0, high: 0, energy: 0, groove: 0, scroll: 0, spec };
   const s = g.song;
   const t = g.t;
   const over = t >= s.length;
+  const has = (id: LayerId) => g.layers > s.layers.indexOf(id) && t > s.intro * s.bar;
   const kick = over ? 0 : Math.exp(-since(s, s.kick, t) * 7);
-  const hatOn = g.layers > s.layers.indexOf('hat') && t > s.intro * s.bar;
-  const hat = hatOn && !over ? Math.exp(-since(s, s.hat, t) * 12) : 0;
-  let bass = kick * 0.5;
+  const hat = has('hat') && !over ? Math.exp(-since(s, s.hat, t) * 12) : 0;
+  const snare = has('snare') && !over ? Math.exp(-since(s, s.snare, t) * 9) : 0;
+  let bass = kick * 0.5, mid = 0.3 * (snare + hat), high = hat * 0.6;
   if (live && audio.analyser && audio.running) {
+    // 256 bins over 0..sampleRate/2: log-spaced groups for the skyline, three bands for the rest
     audio.analyser.getByteFrequencyData(freq);
-    let sum = 0;
-    for (let i = 1; i < 6; i++) sum += freq[i];
-    bass = clamp((sum / 5 / 255 - 0.35) * 1.6, 0, 1);
+    bass = clamp((band(1, 6) - 0.35) * 1.6, 0, 1);
+    mid = clamp((band(8, 40) - 0.2) * 1.8, 0, 1);
+    high = clamp((band(60, 160) - 0.1) * 2.5, 0, 1);
+    for (let i = 0; i < 32; i++) {
+      const lo = Math.floor(Math.pow(200, i / 32)), hi = Math.max(lo + 1, Math.floor(Math.pow(200, (i + 1) / 32)));
+      const v = band(lo, hi);
+      spec[i] = Math.max(spec[i] * 0.85, clamp((v - 0.25) * 1.6, 0, 1) * 255);
+    }
+  } else {
+    // demo / no audio: a fake spectrum from the drum envelopes
+    for (let i = 0; i < 32; i++) {
+      const k = i / 32;
+      const v = kick * (1 - k) * 0.9 + (hat + snare) * k * 0.6 + 0.08 * Math.sin(t * 3 + i);
+      spec[i] = Math.max(spec[i] * 0.85, clamp(v, 0, 1) * 255);
+    }
   }
   grooveK += ((g.groove ? 1 : 0) - grooveK) * damp(4, dt);
-  return { kick, hat, bass, energy: g.layers / s.layers.length, groove: grooveK, scroll: t / s.beat };
+  return { kick, snare, hat, bass, mid, high, energy: g.layers / s.layers.length, groove: grooveK, scroll: t / s.beat, spec };
 }
 
 // ------------------------------------------------------------ loop
 let lastFrame = performance.now() / 1000;
+const FREEZE_MS = 40;
+let freezeUntil = 0;
 let fps = 60;
 let slowFrames = 0;
 
@@ -361,7 +386,10 @@ function frame(nowMs: number) {
     if (mode === 'play') {
       if (input.keyDir) game.target += input.keyDir * BAL.paddle.keySpeed * dt;
       if (auto) auto.update(game, dt);
-      const target = audio.now();
+      // a perfect hit freezes the world for a blink; afterwards it catches up a little faster
+      const heard = audio.now();
+      const target = performance.now() < freezeUntil ? game.t
+        : heard - game.t > 0.3 ? heard : Math.min(heard, game.t + Math.max(dt * 1.6, 0.03));
       let n = 0;
       while (game.t + BAL.dt <= target && n < 480) {
         game.step(BAL.dt);

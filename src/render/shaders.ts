@@ -24,71 +24,143 @@ void main(){
 }`;
 
 // ---------------------------------------------------------------- background
-// A synthwave night behind the playfield: sky, banded sun, mountains, a perspective grid
-// rolling towards us. Everything pulses with the music (kick, hats, bass level).
+// A synthwave night behind the playfield: sky, banded sun, two mountain ridges with neon rims,
+// a perspective grid rolling towards us. It reacts to the music (kick, snare, hats, spectrum)
+// and grows with the layers the player unlocks:
+//   hat → stars twinkle, snare → the sky flashes, pad → aurora ribbons, arp → laser fan from the
+//   horizon (one beam per 16th), bass2 → the floor waves, perc → a spectrum skyline on the horizon.
 export const BG_FS = `${H}
 ${SAFE}
 ${NOISE}
 in vec2 v_uv;
 uniform vec2 u_res;
 uniform float u_time;
-uniform float u_scroll;    // grid travel, in grid cells (follows the beat)
-uniform float u_kick;      // 0..1 envelope
+uniform float u_songT;     // song time (s), for patterns locked to the music
+uniform float u_s16;       // seconds per 16th
+uniform float u_scroll;    // grid travel, in grid cells (one per beat)
+uniform float u_kick;      // 0..1 envelopes
+uniform float u_snare;
 uniform float u_hat;
-uniform float u_bass;      // 0..1 low-band level
+uniform float u_bass;      // 0..1 band levels
+uniform float u_mid;
+uniform float u_high;
 uniform float u_energy;    // 0..1 how much of the song is unlocked
 uniform float u_groove;    // 0..1 "w rytmie"
+uniform vec4 u_layA;       // hat, snare, pad, arp (0..1, eased)
+uniform vec2 u_layB;       // bass2, perc
+uniform sampler2D u_spec;  // 32 spectrum bins (R8)
 uniform vec4 u_field;      // playfield rect in pixels: x0, y0, x1, y1
 uniform float u_hz;        // horizon height (0..1 of the screen)
+uniform float u_detail;    // quality 0.5..1
 out vec4 o;
+
+float ridge(float x, float s, float a){
+  return a * (.55 * vnoise(x * 2.1 * s + 3.) + .3 * vnoise(x * 5.3 * s + 11.) + .15 * vnoise(x * 13. * s + 7.));
+}
+
 void main(){
   vec2 fc = gl_FragCoord.xy;
   float asp = u_res.x / u_res.y;
   vec2 p = vec2((v_uv.x - .5) * asp, v_uv.y);
   float hz = u_hz;
   vec3 c;
-  vec3 pink = vec3(1., .12, .45), violet = vec3(.25, .05, .55), deep = vec3(.012, .004, .03);
+  vec3 pink = vec3(1., .12, .45), violet = vec3(.25, .05, .55), cyan = vec3(.1, .8, 1.), deep = vec3(.012, .004, .03);
+  float step16 = floor(u_songT / u_s16);
+  float sunY = hz + .13;
+  vec3 sunHot = mix(vec3(1., .72, .18), vec3(1., .9, .6), u_groove * .5);
+
   if (p.y > hz) {
-    // sky
     float h = (p.y - hz) / (1. - hz);
-    c = mix(pink * .22, violet * .08, smoothstep(0., .35, h));
+    c = mix(pink * .2, violet * .08, smoothstep(0., .35, h));
     c = mix(c, deep, smoothstep(.3, 1., h));
-    // stars twinkle with the hats
+    // snare: the sky flashes up from the horizon
+    c += mix(pink, violet, h) * exp(-h * 4.) * u_snare * u_layA.y * .35;
+
+    // stars, twinkling with the hats once the hi-hat layer is in
     vec2 sp = floor(fc / 3.);
     float st = hash12(sp);
     float tw = .5 + .5 * sin(u_time * 3. + st * 40.);
-    c += vec3(.8, .85, 1.) * step(.9965, st) * (.25 + .9 * u_hat * tw) * smoothstep(.15, .5, h);
-    // sun with bands cut out of its lower half
-    vec2 sc = vec2(0., hz + .13);
+    float dens = mix(.9975, .993, u_layA.x);
+    c += vec3(.8, .85, 1.) * step(dens, st) * (.25 + 1.1 * u_hat * tw * u_layA.x) * smoothstep(.12, .45, h);
+
+    // pad: aurora ribbons drifting across the sky
+    if (u_layA.z > .01 && u_detail > .6) {
+      for (int i = 0; i < 2; i++) {
+        float fi = float(i);
+        float yy = .42 + fi * .16 + .05 * sin(p.x * (2.3 + fi) + u_time * (.25 + fi * .1)) + .03 * sin(p.x * 6.1 - u_time * .4 + fi * 2.);
+        float dd = h - yy;
+        float band = exp(-dd * dd / (.0016 + .0012 * fi)) * (.6 + .4 * vnoise(p.x * 8. + u_time * .6 + fi * 9.));
+        vec3 ac = mix(cyan, violet * 2., .5 + .5 * sin(p.x * 2. + fi * 2. + u_time * .2));
+        c += ac * band * u_layA.z * (.3 + .4 * u_mid);
+      }
+    }
+
+    // arp: a fan of lasers from behind the mountains, the beam of this 16th lit
+    vec2 lo = vec2(0., hz + .02);
+    if (u_layA.w > .01) {
+      vec2 d0 = p - lo;
+      float ang = atan(d0.x, d0.y);
+      float far = smoothstep(0., .08, d0.y) * exp(-length(d0) * 1.6);
+      for (int i = 0; i < 6; i++) {
+        float fi = float(i);
+        float a = (fi - 2.5) * .26;
+        float on = 1. - step(.5, abs(mod(step16, 6.) - fi));
+        float w = abs(ang - a) * length(d0);
+        float beam = exp(-w * w / .00002) * .9 + exp(-w * w / .0006) * .25;
+        vec3 bc = mod(fi, 2.) < .5 ? pink : cyan;
+        c += bc * beam * far * u_layA.w * (.12 + .9 * on * (1. - fract(u_songT / u_s16)));
+      }
+    }
+
+    // sun with bands sliding down its lower half
+    vec2 sc = vec2(0., sunY);
     float R = .2 * (1. + u_kick * .035);
     float d = length(p - sc);
     float k = clamp((p.y - (sc.y - R)) / (2. * R), 0., 1.);
-    vec3 sun = mix(vec3(1., .08, .35), vec3(1., .72, .18), k) * (.55 + u_energy * .5 + u_kick * .35);
+    vec3 sun = mix(vec3(1., .08, .35), sunHot, k) * (.5 + u_energy * .3 + u_kick * .3 + u_groove * .2);
     float bands = step(.5, fract((p.y - hz) * 46. - u_time * .4)) + step(.55, k);
     float inside = smoothstep(.003, -.003, d - R) * clamp(bands, 0., 1.);
     c = mix(c, sun, inside);
-    c += vec3(1., .2, .5) * exp(-max(d - R, 0.) * 9.) * (.1 + .15 * u_kick + .1 * u_energy);
-    // mountains on the horizon
+    c += vec3(1., .2, .5) * exp(-max(d - R, 0.) * 9.) * (.1 + .15 * u_kick + .12 * u_energy);
+
+    // perc: a spectrum skyline on the horizon, mirrored around the centre
+    if (u_layB.y > .01) {
+      float bx = abs(p.x) / (asp * .5);
+      float bin = floor(bx * 24.);
+      float v = texture(u_spec, vec2((bin + .5) / 32., .5)).r;
+      float bh = hz + .015 + v * .16 * u_layB.y;
+      float inBar = step(.18, fract(bx * 24.)) * smoothstep(.001, -.001, p.y - bh);
+      vec3 ec = mix(cyan, pink, clamp((p.y - hz) / .16, 0., 1.));
+      c = mix(c, ec * (.35 + .7 * v), inBar * .8);
+    }
+
+    // two ridges: far violet, near dark, both with a neon rim that glows with the mids
     float x = p.x * 3.;
-    float m = hz + .05 * vnoise(x * 2.1 + 3.) + .025 * vnoise(x * 5.3) + .01 * vnoise(x * 13.);
-    m *= 1. - .3 * smoothstep(.0, .3, .35 - abs(p.x));
-    float mm = smoothstep(.002, -.002, p.y - max(m, hz + .004));
-    c = mix(c, vec3(.03, .006, .05), mm);
-    c += vec3(.6, .1, .9) * mm * exp(-(m - p.y) * 60.) * .25;
+    float m1 = hz + .006 + ridge(x, .7, .085) * (1. - .55 * smoothstep(.0, .25, .3 - abs(p.x)));
+    float m2 = hz + .002 + ridge(x + 40., 1.3, .055) * (1. - .7 * smoothstep(.0, .3, .38 - abs(p.x)));
+    float in1 = smoothstep(.0015, -.0015, p.y - m1);
+    float in2 = smoothstep(.0015, -.0015, p.y - m2);
+    c = mix(c, vec3(.05, .01, .09) + violet * .05 * (m1 - p.y) * 10., in1);
+    c += pink * exp(-abs(p.y - m1) * 500.) * (.25 + .5 * u_mid + .3 * u_kick) * (1. - in2);
+    c = mix(c, vec3(.012, .003, .025), in2);
+    c += cyan * exp(-abs(p.y - m2) * 600.) * (.2 + .4 * u_bass) * .8;
   } else {
-    // floor: a grid in perspective, rolling towards us on the beat (lines 1–2 px wide on screen)
+    // floor: a grid in perspective rolling towards us on the beat; bass2 makes it wave
     float dy = hz - p.y;
-    vec2 g = vec2(p.x / (dy + .01) * .55, .32 / (dy + .01) + u_scroll);
+    float z = .32 / (dy + .01);
+    float wave = u_layB.x * .35 * sin(z * .9 - u_scroll * 6.2832) * (.5 + .7 * u_bass);
+    vec2 g = vec2(p.x / (dy + .01) * .55, z + u_scroll + wave);
     vec2 fw = fwidth(g);
     vec2 gd = abs(fract(g + .5) - .5) / max(fw, vec2(1e-4));
     float lx = 1. - smoothstep(.5, 1.6, gd.x);
     float ly = 1. - smoothstep(.5, 1.6, gd.y);
-    // fade lines where they get denser than a few px apart (near the horizon)
     float fade = smoothstep(.35, .08, fw.y) * smoothstep(.5, .1, fw.x);
     float line = max(lx * smoothstep(.6, .1, fw.x), ly * fade);
-    vec3 lc = mix(vec3(.15, .85, 1.), vec3(1., .2, .8), clamp(u_groove * .7 + u_bass * .3, 0., 1.));
+    vec3 lc = mix(cyan * 1.2, vec3(1., .2, .8), clamp(u_groove * .8 + u_bass * .25, 0., 1.));
     c = mix(vec3(.01, .002, .03), violet * .05, smoothstep(0., .3, dy));
     c += lc * line * (.35 + .9 * u_kick + .6 * u_bass) * smoothstep(0., .04, dy);
+    // the sun's reflection on the floor
+    c += sunHot * exp(-abs(p.x) * 7.) * exp(-dy * 7.) * (.12 + .2 * u_kick) * (.6 + u_energy);
     // the horizon glows
     c += pink * exp(-dy * 40.) * (.5 + .4 * u_kick);
   }
@@ -96,24 +168,28 @@ void main(){
   vec4 f = u_field;
   vec2 q = max(vec2(f.x - fc.x, f.y - fc.y), vec2(fc.x - f.z, fc.y - f.w));
   float inField = step(max(q.x, q.y), 0.);
-  c *= mix(1., .38, inField);
+  c *= mix(1., .4, inField);
   o = vec4(safe(c), 1.);
 }`;
 
 // ---------------------------------------------------------------- neon shapes
-// Instanced quads with a rounded-box SDF. Premultiplied output: alpha covers, rgb adds light.
-// kind 0: emissive blob/box, 1: glass brick, 2: ring (extra = thickness), 3: hard brick (extra = hp left 0..1)
+// Instanced quads with an SDF, optionally rotated. Premultiplied output: alpha covers, rgb adds
+// light (ext.w = 1 → purely additive). kind 0: glow box / capsule / circle, 1: glass brick,
+// 2: ring (extra = thickness), 3: hard brick (extra = hp left 0..1), 4: glass shard (a right
+// triangle in its box, ext.yz flip it).
 export const SHAPE_VS = `${H}
 layout(location=0) in vec2 a_corner;
 layout(location=1) in vec4 a_box;   // cx, cy, half w, half h (world)
 layout(location=2) in vec4 a_par;   // corner radius, kind, glow radius, extra
 layout(location=3) in vec4 a_col;   // linear rgb (HDR), alpha
+layout(location=4) in vec4 a_ext;   // rotation, flip x, flip y, additive
 uniform vec4 u_view;                // field origin in px (x0, y0), px per unit, 0
 uniform vec2 u_res;
 out vec2 v_p;
 out vec4 v_box;
 out vec4 v_par;
 out vec4 v_col;
+out vec4 v_ext;
 void main(){
   float m = a_par.z * 4.5 + 2. / u_view.z;
   vec2 hs = a_box.zw + m;
@@ -121,7 +197,9 @@ void main(){
   v_box = a_box;
   v_par = a_par;
   v_col = a_col;
-  vec2 w = a_box.xy + v_p;
+  v_ext = a_ext;
+  float cs = cos(a_ext.x), sn = sin(a_ext.x);
+  vec2 w = a_box.xy + mat2(cs, sn, -sn, cs) * v_p;
   vec2 px = u_view.xy + w * u_view.z;
   gl_Position = vec4(px / u_res * 2. - 1., 0., 1.);
 }`;
@@ -131,44 +209,71 @@ in vec2 v_p;
 in vec4 v_box;
 in vec4 v_par;
 in vec4 v_col;
+in vec4 v_ext;
 uniform float u_px;   // world units per pixel
+uniform float u_time;
 out vec4 o;
 float sdBox(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.)) + min(max(q.x, q.y), 0.) - r; }
+float sdTri(vec2 p, vec2 p0, vec2 p1, vec2 p2){
+  vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+  vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
+  vec2 pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0., 1.);
+  vec2 pq1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0., 1.);
+  vec2 pq2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0., 1.);
+  float s = sign(e0.x * e2.y - e0.y * e2.x);
+  vec2 d = min(min(vec2(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
+                   vec2(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
+                   vec2(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
+  return -sqrt(d.x) * sign(d.y);
+}
 void main(){
-  float r = min(v_par.x, min(v_box.z, v_box.w));
-  float d = sdBox(v_p, v_box.zw, r);
   int kind = int(v_par.y + .5);
+  vec2 b = v_box.zw;
+  float r = min(v_par.x, min(b.x, b.y));
+  vec2 p = v_p;
+  float d;
+  if (kind == 4) {
+    vec2 fp = p * vec2(v_ext.y < 0. ? -1. : 1., v_ext.z < 0. ? -1. : 1.);
+    d = sdTri(fp, -b, vec2(b.x, -b.y), vec2(-b.x, b.y));
+  } else d = sdBox(p, b, r);
+  if (kind == 2) d = abs(d) - v_par.w;
   float aa = u_px;
-  float glowR = max(v_par.z, 1e-3);
   vec3 col = v_col.rgb;
-  float a = v_col.a;
-  if (kind == 2) {
-    d = abs(d) - v_par.w;
-  }
-  float fill = smoothstep(aa, -aa, d);
-  float glow = v_par.z > 0. ? exp(-max(d, 0.) / glowR) * (1. - fill) : 0.;
+  float fill = clamp(.5 - d / (2. * aa), 0., 1.);
+  // glow fades to exactly zero before the quad's edge (4.5 radii out), or the quad shows as a box
+  float gx0 = max(d, 0.) / max(v_par.z, 1e-3);
+  float glow = v_par.z > 0. ? exp(-gx0) * (1. - smoothstep(2.5, 4.4, gx0)) * (1. - fill) : 0.;
   vec3 c;
-  float cover;
-  if (kind == 1 || kind == 3) {
-    // glass: dark tinted body, bright rim, a sheen across the top
-    float rim = smoothstep(-3.5 * aa - 2.5, -aa, d);
-    float sheen = smoothstep(.2, 1., v_p.y / v_box.w) * .35;
-    vec3 body = col * (.16 + sheen) + col * .05;
-    c = mix(body, col * 1.6, rim);
+  if (kind == 1 || kind == 3 || kind == 4) {
+    // neon glass: dark tinted body brighter towards the top, a thin bright rim, an inner glow,
+    // a bevel highlight along the top edge and a glint sweeping across now and then
+    vec2 q = p / b;
+    float inside = max(-d, 0.);
+    float rim = exp(-inside / (1.2 + aa * 1.5));
+    float inner = exp(-inside / 7.);
+    vec3 body = col * (.06 + .09 * (q.y * .5 + .5));
+    float bevel = smoothstep(.45, .95, q.y) * exp(-inside / 3.) * .5;
+    float gx = q.x * .8 + q.y * .35 - (fract(u_time * .12 + v_box.x * .0021 + v_box.y * .0013) * 6. - 3.);
+    float glint = exp(-gx * gx * 30.) * .45;
+    c = body + col * (rim * 1.7 + inner * .45) + (col * .4 + vec3(.35)) * (bevel + glint);
     if (kind == 3) {
-      // hard: an inner frame and bars for the hits left
-      float inner = abs(sdBox(v_p, v_box.zw - 7., r * .5)) - .9;
-      c += col * smoothstep(aa, -aa, inner) * .9;
-      float bars = step(abs(v_p.y), v_box.w * .32) * step(fract((v_p.x / v_box.z * .5 + .5) * 3.) , .82 * v_par.w + .0);
-      c += col * bars * .25;
+      // hard: a heavy inner frame and rivets; cracks spread as it takes hits
+      float frame = abs(sdBox(p, b - 6.5, 3.)) - 1.1;
+      c += col * clamp(.5 - frame / (2. * aa), 0., 1.) * 1.1;
+      vec2 rv = abs(p) - (b - 6.5);
+      c += col * 1.5 * smoothstep(1.8, .8, length(rv));
+      float dmg = 1. - v_par.w;
+      float cr = abs(fract((q.x * 1.7 + q.y * .9 + sin(q.y * 9. + v_box.x) * .15) * 1.6) - .5);
+      float cr2 = abs(fract((q.x * -1.3 + q.y * 1.1 + v_box.y * .01) * 1.3) - .5);
+      float crack = (smoothstep(.03, 0., cr) * step(.3, dmg) + smoothstep(.025, 0., cr2) * step(.6, dmg));
+      c += vec3(1.6, 1.4, 1.1) * crack * .8;
     }
     c *= fill;
-    cover = fill * a;
   } else {
     c = col * fill;
-    cover = fill * a;
   }
   c += col * glow * .6;
+  float cover = v_ext.w > .5 ? 0. : fill * v_col.a;
   o = vec4(c * v_col.a, cover);
 }`;
 
@@ -233,10 +338,18 @@ uniform float u_ca;
 uniform vec4 u_shock[4];   // center (px), radius (px), amplitude
 uniform float u_flash;     // white flash 0..1
 uniform vec3 u_tint;       // added colour (red on a lost ball)
+uniform float u_zoom;      // camera breathing with the beat (1 = still)
+uniform vec2 u_shake;      // px
+uniform float u_glitch;    // 0..1 slices shifted sideways (lost ball)
 out vec4 o;
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14), 0., 1.); }
 void main(){
-  vec2 uv = v_uv;
+  vec2 uv = (v_uv - .5) / u_zoom + .5 + u_shake / u_res;
+  if (u_glitch > .01) {
+    float row = floor(v_uv.y * 38.);
+    float n = hash12(vec2(row, floor(u_time * 24.)));
+    uv.x += (n - .5) * step(.72, n) * .06 * u_glitch;
+  }
   vec2 fc = uv * u_res;
   // shockwaves bend space: a ring pushing pixels outwards
   float kk = 0.;
