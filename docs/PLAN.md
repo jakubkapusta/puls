@@ -210,7 +210,8 @@ Tło rośnie z warstwami: hi-hat → gwiazdy migają, werbel → błyski nieba, 
 Tło synthwave reagujące na muzykę, szklane klocki i odłamki, ślad piłki, fale uderzeniowe w composite, aberracja, zamrożenie klatki, oddychająca kamera, obniżanie jakości.
 **Odbiór:** zrzuty w pionie i poziomie, 60 fps w emulacji średniego telefonu, brak NaN.
 
-### M3: Pełny poziom
+### M3: Pełny poziom (zrobione 2026-10-06, czeka na test właściciela)
+Mapa tempa wspólna dla gry i sekwencera (Metronom i Zwolnienie zmieniają tempo od najbliższej bezpiecznej kreski taktowej). Laser strzela na ósemki, a każdy strzał to staccato grane przez sekwencer w tym samym momencie. Magnes trzyma piłkę, a pchnięcie palcem ją wypuszcza. Polifonia: dopóki leci dodatkowa piłka, utrata głównej nie kosztuje życia. Drop: biały klocek, po zbiciu wszystkich 4 takty pełnego utworu, rozgrzanej piłki i podwójnych punktów.
 Klocki specjalne, power-upy, HUD i menu docelowe, podpowiedzi przy pierwszej grze, pełna pętla poziomu.
 
 ### M4: MVP

@@ -14,7 +14,7 @@ const skills = arg('skill', '0.2,0.5,0.9').split(',').map(Number);
 const song = SONGS.find((s) => s.id === arg('song', SONGS[0].id)) ?? SONGS[0];
 if (process.env.BAL) mergeBal(JSON.parse(process.env.BAL));
 
-const diag = { blocked: 0, none: 0, grid: [0, 0, 0], unsynced: 0, contacts: 0 };
+const diag = { blocked: 0, none: 0, grid: [0, 0, 0], unsynced: 0, contacts: 0, powers: 0, specials: 0, saved: 0, drops: 0, games: 0 };
 const pct = (a: number, b: number) => (b ? ((100 * a) / b).toFixed(0) + '%' : '-');
 const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 
@@ -27,7 +27,7 @@ for (const skill of skills) {
     const g = new Game(song, 1000 + r);
     const bot = new Bot(skill, 77 + r * 13);
     let fl = -1;
-    while (g.phase !== 'over' && g.t < song.length + 10) {
+    while (g.phase !== 'over' && g.t < g.length + 10) {
       bot.update(g, BAL.dt);
       g.step(BAL.dt);
       for (const e of g.drain()) if (e.type === 'lost' && fl < 0) fl = g.t;
@@ -35,6 +35,11 @@ for (const skill of skills) {
     diag.blocked += g.stats.planBlocked;
     diag.none += g.stats.planNone;
     diag.unsynced += g.stats.unsyncedContacts;
+    diag.powers += g.stats.powers;
+    diag.specials += g.stats.specials;
+    diag.saved += g.stats.saved;
+    diag.drops += g.stats.drops;
+    diag.games++;
     diag.contacts += g.stats.contacts;
     g.stats.planGrid.forEach((v, i) => (diag.grid[i] += v));
     if (g.passed) pass++;
@@ -61,3 +66,4 @@ for (const skill of skills) {
 const tot = diag.blocked + diag.none + diag.grid.reduce((a, b) => a + b, 0);
 console.log(`\nplans: blocked ${pct(diag.blocked, tot)}, no grid in range ${pct(diag.none, tot)}, beat ${pct(diag.grid[0], tot)}, 8th ${pct(diag.grid[1], tot)}, 16th ${pct(diag.grid[2], tot)}`);
 console.log(`contacts without a planned beat: ${pct(diag.unsynced, diag.contacts)}`);
+console.log(`per game: power-ups caught ${(diag.powers / diag.games).toFixed(1)}, specials ${(diag.specials / diag.games).toFixed(1)}, balls saved by multiball ${(diag.saved / diag.games).toFixed(2)}, drops ${pct(diag.drops, diag.games)}`);

@@ -341,6 +341,7 @@ uniform vec3 u_tint;       // added colour (red on a lost ball)
 uniform float u_zoom;      // camera breathing with the beat (1 = still)
 uniform vec2 u_shake;      // px
 uniform float u_glitch;    // 0..1 slices shifted sideways (lost ball)
+uniform float u_dim;       // 0..1 the Filtr brick: the picture sinks with the sound
 out vec4 o;
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14), 0., 1.); }
 void main(){
@@ -368,6 +369,7 @@ void main(){
   vec2 cd = (uv - .5) * (u_ca + kk * .006);
   vec3 c = vec3(texture(u_scene, uv + cd).r, texture(u_scene, uv).g, texture(u_scene, uv - cd).b);
   c = safe(c) + safe(texture(u_bloom, uv).rgb) * u_bloomAmt;
+  c *= 1. - u_dim;
   c += u_tint + vec3(u_flash);
   c = aces(c);
   vec2 q = v_uv - .5;

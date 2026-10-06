@@ -71,7 +71,7 @@ export const BAL = {
   },
   hard: {
     /** hits a hard brick takes; each one sounds a scale step higher */
-    hp: 3,
+    hp: 4,
   },
   score: {
     /** every score × this (the fast ball pays more) */
@@ -85,6 +85,47 @@ export const BAL = {
     lifeLeft: 1000,
     /** per bar left when every brick is down */
     barLeft: 200,
+  },
+  special: {
+    /** neighbours an arpeggiator brick breaks, one per 16th */
+    arpMax: 4,
+    /** echo clones: how many, for how long (s) */
+    echoBalls: 2,
+    echoTime: 5,
+  },
+  tempo: {
+    /** a Metronom brick changes the tempo by this fraction, within min..max of the song's own */
+    step: 0.1,
+    min: 0.8,
+    max: 1.3,
+    /** tempo changes start on the first bar line at least this far ahead (s): the audio must not
+     *  have scheduled it yet (lookahead + output latency) */
+    lead: 0.6,
+  },
+  drop: {
+    /** bars the drop lasts; score multiplier while it does */
+    bars: 4,
+    scoreMul: 2,
+    /** bricks the white-hot ball goes through per flight while the drop lasts */
+    pierce: 3,
+  },
+  power: {
+    /** chance a broken brick drops a power-up (only one falls at a time) */
+    chance: 0.08,
+    /** no power-ups until this many bricks are down */
+    after: 4,
+    fall: 260,
+    /** durations in bars */
+    laserBars: 4,
+    wideBars: 8,
+    magnetBars: 8,
+    slowBars: 4,
+    wide: 1.45,
+    slow: 0.82,
+    multiBalls: 2,
+    laserSpeed: 1800,
+    /** a ball held by the magnet goes by itself after this many seconds */
+    magnetHold: 1.2,
   },
   lives: 3,
   /** fraction of bricks needed to pass when the song ends */

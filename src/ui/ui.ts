@@ -44,7 +44,11 @@ export class UI {
   private pauseEl: HTMLElement;
   private end: HTMLElement;
   private calib: HTMLElement;
+  private howto: HTMLElement;
+  private card: HTMLElement;
   private debug: HTMLElement;
+  private fxEl: HTMLElement;
+  private fxKey = '';
   private last = { score: -1, mult: -1, lives: -1, layers: -1 };
   private sel: TestSel | null = null;
 
@@ -56,6 +60,7 @@ export class UI {
         <button class="icon-btn pause-btn" aria-label="Pauza"><svg viewBox="0 0 16 16"><rect x="3" y="2" width="3.5" height="12" rx="1" fill="currentColor"/><rect x="9.5" y="2" width="3.5" height="12" rx="1" fill="currentColor"/></svg></button>
         <div class="progress"><b></b></div>
       </div>
+      <div class="fx"></div>
       <div class="groove">w rytmie</div>
       <div class="hint"></div>
       <div class="pops"></div>
@@ -69,6 +74,7 @@ export class UI {
           <div class="song-line"></div>
           <div class="speed"><span>Piłka</span><div class="chips speed-chips"></div></div>
           <div class="row-btns">
+            <button class="btn small howto-open">Jak grać</button>
             <button class="btn small calib-open">Kalibracja dźwięku</button>
             <button class="btn small sound-btn"></button>
           </div>
@@ -100,6 +106,36 @@ export class UI {
         </div>
       </div>
 
+      <div class="title-card"><h2></h2><p></p></div>
+
+      <div class="screen howto">
+        <div class="panel wide">
+          <h2>Jak grać</h2>
+          <div class="howto-body">
+            <p>Każdy klocek to nuta. Zbity rząd dokłada do utworu nową warstwę, a stracona piłka ją zabiera.</p>
+            <p><b>Uderzenie w rytm:</b> gdy piłka spada na paletkę, pchnij palec w górę (na laptopie spacja albo klik). Piłka zawsze spada na bit, więc słuchaj muzyki. Trafienie rozgrzewa piłkę i podbija mnożnik, a seria daje stan „w rytmie”.</p>
+            <h3>Klocki specjalne</h3>
+            <ul>
+              <li><b>Akord</b> — trzy nuty naraz.</li>
+              <li><b>Perkusja</b> — od razu nowa ścieżka.</li>
+              <li><b>Arpeggiator</b> — rozbija sąsiadów po kolei, w rytmie.</li>
+              <li><b>Filtr</b> — zamyka i otwiera brzmienie.</li>
+              <li><b>Echo</b> — piłka na chwilę się klonuje.</li>
+              <li><b>Metronom</b> — tempo w górę albo w dół.</li>
+              <li><b>Twardy</b> — kilka trafień, każde wyżej.</li>
+              <li><b>Drop</b> — zbij wszystkie białe, a utwór wybuchnie.</li>
+            </ul>
+            <h3>Kapsułki (łap paletką)</h3>
+            <ul>
+              <li><b>Polifonia</b> — dwie dodatkowe piłki.</li>
+              <li><b>Laser</b> — paletka strzela na ósemki.</li>
+              <li><b>Szeroka paletka</b>, <b>Magnes</b>, <b>Zwolnienie</b> tempa.</li>
+            </ul>
+          </div>
+          <button class="btn primary howto-done">Rozumiem</button>
+        </div>
+      </div>
+
       <div class="screen calib">
         <div class="panel">
           <h2>Kalibracja dźwięku</h2>
@@ -125,7 +161,10 @@ export class UI {
     this.pauseEl = $(root, '.pause');
     this.end = $(root, '.end');
     this.calib = $(root, '.calib');
+    this.howto = $(root, '.howto');
+    this.card = $(root, '.title-card');
     this.debug = $(root, '.debug');
+    this.fxEl = $(root, '.fx');
 
     const on = (sel: string, f: () => void) =>
       root.querySelectorAll(sel).forEach((el) => el.addEventListener('click', (e) => {
@@ -138,6 +177,8 @@ export class UI {
     on('.to-menu', () => h.menu());
     on('.again', () => h.again());
     on('.calib-open', () => h.calibOpen());
+    on('.howto-open', () => this.show(this.howto));
+    on('.howto-done', () => this.show(this.menu));
     on('.calib-start', () => h.calibStart());
     on('.calib-done', () => h.calibDone());
     on('.sound-btn', () => {
@@ -160,7 +201,7 @@ export class UI {
 
   // ------------------------------------------------------------ screens
   private show(el: HTMLElement | null) {
-    for (const s of [this.menu, this.pauseEl, this.end, this.calib]) s.classList.toggle('show', s === el);
+    for (const s of [this.menu, this.pauseEl, this.end, this.calib, this.howto]) s.classList.toggle('show', s === el);
   }
 
   showMenu(sel: TestSel, songLine: string, speed: SpeedId) {
@@ -279,6 +320,20 @@ export class UI {
     this.last = { score: -1, mult: -1, lives: -1, layers: -1 };
     this.groove.classList.remove('show');
     $(this.root, '.pops').innerHTML = '';
+    this.setFx([]);
+  }
+
+  /** chips for what is active right now; rebuilt only when the set changes */
+  setFx(items: { id: string; label: string; k: number; color: string }[]) {
+    const key = items.map((i) => i.id + ':' + i.label).join('|');
+    if (key !== this.fxKey) {
+      this.fxKey = key;
+      this.fxEl.innerHTML = items.map((i) => `<div class="chipfx" style="--c:${i.color}"><span>${i.label}</span><i><b></b></i></div>`).join('');
+    }
+    const bars = this.fxEl.querySelectorAll<HTMLElement>('b');
+    items.forEach((it, n) => {
+      if (bars[n]) bars[n].style.transform = `scaleX(${it.k})`;
+    });
   }
 
   setGroove(on: boolean) {
@@ -293,6 +348,15 @@ export class UI {
     p.style.top = y + 'px';
     $(this.root, '.pops').appendChild(p);
     setTimeout(() => p.remove(), 900);
+  }
+
+  /** the song's name over the board for a moment at the start */
+  titleCard(title: string, sub: string) {
+    $(this.root, '.title-card h2').textContent = title;
+    $(this.root, '.title-card p').textContent = sub;
+    this.card.classList.remove('show');
+    void this.card.offsetWidth;
+    this.card.classList.add('show');
   }
 
   hint(text: string | null) {

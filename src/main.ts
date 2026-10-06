@@ -5,7 +5,7 @@ import './style.css';
 
 import { Renderer, type Beat } from './render/renderer';
 import { Audio } from './audio/audio';
-import { Game } from './game/game';
+import { Game, type PowerId, type SpecialId } from './game/game';
 import { BAL, mergeBal, resetBal } from './game/balance';
 import { Input } from './game/input';
 import { UI, type EndInfo } from './ui/ui';
@@ -149,6 +149,8 @@ function start() {
   ui.hideScreens();
   ui.hudVisible(true);
   input.enabled = true;
+  ui.titleCard(song.title, `${song.bpm} BPM`);
+  tipUntil = 0;
   hintStage = hintSeen('launch') ? (hintSeen('swing') ? 2 : 1) : 0;
   if (hintStage === 0) ui.hint(touchSeen ? 'Przesuwaj palcem, żeby sterować paletką. <b>Stuknij</b>, żeby wystrzelić piłkę.' : 'Mysz albo strzałki sterują paletką. <b>Klik</b> albo <b>spacja</b> wystrzeliwuje piłkę.');
 }
@@ -174,6 +176,54 @@ document.addEventListener('visibilitychange', () => {
 // ------------------------------------------------------------ hints
 let hintStage = 2;
 let hintUntil = 0;
+let tipUntil = 0;
+/** a one-time tip the first time something happens (not over the swing hint) */
+function tip(id: string, html: string) {
+  if (hintSeen(id) || hintStage === 3) return;
+  markHint(id);
+  ui.hint(html);
+  tipUntil = performance.now() + 4500;
+}
+
+const SPECIAL_NAMES: Record<SpecialId, string> = {
+  chord: 'Akord', perc: 'Perkusja', arp: 'Arpeggiator', filter: 'Filtr', echo: 'Echo', tempoUp: 'Szybciej', tempoDown: 'Wolniej', drop: 'Drop',
+};
+const SPECIAL_TIPS: Record<SpecialId, string> = {
+  chord: 'Klocek <b>Akord</b> gra trzy nuty naraz.',
+  perc: '<b>Perkusja</b> od razu dokłada do utworu nową ścieżkę.',
+  arp: '<b>Arpeggiator</b> rozbija sąsiednie klocki jeden po drugim, w rytmie.',
+  filter: '<b>Filtr</b> na chwilę zamyka i otwiera brzmienie całego utworu.',
+  echo: '<b>Echo</b>: piłka na chwilę się klonuje, a klony też zbijają klocki.',
+  tempoUp: '<b>Metronom</b> zmienia tempo utworu od następnego taktu (strzałka w górę: szybciej, w dół: wolniej).',
+  tempoDown: '<b>Metronom</b> zmienia tempo utworu od następnego taktu (strzałka w górę: szybciej, w dół: wolniej).',
+  drop: 'Zbij wszystkie białe klocki <b>Drop</b>, a utwór wybuchnie: 4 takty rozgrzanej piłki i podwójnych punktów.',
+};
+const POWER_NAMES: Record<PowerId, string> = { multi: 'Polifonia', laser: 'Laser', wide: 'Szeroka paletka', magnet: 'Magnes', slow: 'Zwolnienie' };
+const POWER_TIPS: Record<PowerId, string> = {
+  multi: '<b>Polifonia</b>: dwie dodatkowe piłki. Dopóki któraś leci, nie tracisz życia.',
+  laser: '<b>Laser</b>: paletka strzela na każdą ósemkę, staccato.',
+  wide: '<b>Szeroka paletka</b> na kilka taktów.',
+  magnet: '<b>Magnes</b>: piłka przykleja się do paletki. Stuknij albo pchnij palcem w górę, żeby ją wypuścić.',
+  slow: '<b>Zwolnienie</b>: utwór zwalnia na 4 takty.',
+};
+
+/** HUD chips: active power-ups (with time left), the drop counter, a changed tempo */
+function fxItems(g: Game) {
+  const out: { id: string; label: string; k: number; color: string }[] = [];
+  const left = (until: number, bars: number) => clamp((until - g.t) / Math.max(0.1, g.tempo.s16At(g.t) * 16 * bars), 0, 1);
+  const P = BAL.power;
+  if (g.active('laser')) out.push({ id: 'laser', label: POWER_NAMES.laser, k: left(g.fx.laser, P.laserBars), color: '#ff6a5a' });
+  if (g.active('wide')) out.push({ id: 'wide', label: POWER_NAMES.wide, k: left(g.fx.wide, P.wideBars), color: '#5dffa8' });
+  if (g.active('magnet')) out.push({ id: 'magnet', label: POWER_NAMES.magnet, k: left(g.fx.magnet, P.magnetBars), color: '#7fa8ff' });
+  if (g.active('slow')) out.push({ id: 'slow', label: POWER_NAMES.slow, k: left(g.fx.slow, P.slowBars + 1), color: '#ffd27a' });
+  const multi = g.extras.filter((e) => e.kind === 'multi').length;
+  if (multi) out.push({ id: 'multi', label: `${POWER_NAMES.multi} +${multi}`, k: 1, color: '#ff7ae0' });
+  if (g.dropping) out.push({ id: 'drop', label: 'Drop ×2', k: clamp((g.dropUntil - g.t) / (g.dropUntil - g.dropAt), 0, 1), color: '#ffffff' });
+  else if (g.dropTotal && g.dropStep < 0) out.push({ id: 'dropc', label: `Drop ${g.dropTotal - g.dropLeft}/${g.dropTotal}`, k: (g.dropTotal - g.dropLeft) / g.dropTotal, color: '#ffffff' });
+  const bpm = Math.round(g.tempo.bpmAt(g.t));
+  if (bpm !== g.song.bpm) out.push({ id: 'bpm', label: `${bpm} BPM`, k: 1, color: '#ffd27a' });
+  return out;
+}
 function hintOnEvent(type: string) {
   if (hintStage === 0 && type === 'launch') {
     markHint('launch');
@@ -262,6 +312,44 @@ function handleEvents(g: Game) {
         ui.pop(e.lives > 0 ? 'Piłka stracona' : 'Koniec żyć', p.x, p.y, 'lost');
         break;
       }
+      case 'special': {
+        const p = renderer.toCss(e.brick.x, e.brick.y - 40);
+        if (e.special !== 'drop') ui.pop(SPECIAL_NAMES[e.special], p.x, p.y, 'special');
+        tip('sp-' + (e.special === 'tempoDown' ? 'tempoUp' : e.special), SPECIAL_TIPS[e.special]);
+        break;
+      }
+      case 'layer': {
+        const p = renderer.toCss(360, 560);
+        const name = LAYER_NAMES[g.song.layers[e.layers - 1]];
+        if (name) ui.pop('+ ' + name, p.x, p.y, 'row');
+        break;
+      }
+      case 'tempo': {
+        const p = renderer.toCss(360, 640);
+        ui.pop(`Tempo ${e.bpm} BPM`, p.x, p.y, 'special');
+        break;
+      }
+      case 'dropArm': {
+        const p = renderer.toCss(360, 600);
+        ui.pop(`Drop ${e.total - e.left}/${e.total}`, p.x, p.y, 'drop');
+        break;
+      }
+      case 'drop': {
+        const p = renderer.toCss(360, 600);
+        ui.pop('Drop!', p.x, p.y, 'drop big');
+        break;
+      }
+      case 'power': {
+        const p = renderer.toCss(g.px, BAL.paddle.y + 90);
+        ui.pop(POWER_NAMES[e.kind], p.x, p.y, 'power');
+        tip('pw-' + e.kind, POWER_TIPS[e.kind]);
+        break;
+      }
+      case 'saved': {
+        const p = renderer.toCss(g.bx, g.by + 50);
+        ui.pop('Druga piłka przejmuje', p.x, p.y, 'power');
+        break;
+      }
       case 'groove':
         ui.setGroove(e.on);
         break;
@@ -297,7 +385,7 @@ function endLevel(g: Game) {
       test: testTag(sel), calib: Math.round(audio.calib * 1000),
     });
   }
-  const barsLeft = Math.max(0, Math.floor((song.length - st.clearT) / song.bar));
+  const barsLeft = Math.max(0, song.bars - Math.ceil(g.tempo.stepAt(st.clearT) / 16));
   const info: EndInfo = {
     title: g.endReason === 'clear' ? 'Wszystko zbite!' : g.endReason === 'lives' ? 'Koniec żyć' : g.passed ? 'Utwór zaliczony' : 'Za mało klocków',
     sub: g.endReason === 'clear' ? `Finał ${barsLeft} taktów przed końcem utworu` : g.endReason === 'lives' ? `Zbite ${pctB}% klocków`
@@ -318,12 +406,12 @@ function endLevel(g: Game) {
 }
 
 // ------------------------------------------------------------ the music, for the visuals
-function since(s: Song, pat: string, t: number) {
-  const i = Math.floor(t / s.s16);
+function since(g: Game, pat: string, t: number) {
+  const i = Math.floor(g.tempo.stepAt(t));
   for (let k = 0; k < 32; k++) {
     const j = i - k;
     if (j < 0) break;
-    if (pat[((j % 16) + 16) % 16] !== '.') return t - j * s.s16;
+    if (pat[((j % 16) + 16) % 16] !== '.') return t - g.tempo.timeAt(j);
   }
   return 9;
 }
@@ -339,11 +427,12 @@ function beatOf(g: Game | null, dt: number, live: boolean): Beat {
   if (!g || g.t < 0) return { kick: 0, snare: 0, hat: 0, bass: 0, mid: 0, high: 0, energy: 0, groove: 0, scroll: 0, spec };
   const s = g.song;
   const t = g.t;
-  const over = t >= s.length;
-  const has = (id: LayerId) => g.layers > s.layers.indexOf(id) && t > s.intro * s.bar;
-  const kick = over ? 0 : Math.exp(-since(s, s.kick, t) * 7);
-  const hat = has('hat') && !over ? Math.exp(-since(s, s.hat, t) * 12) : 0;
-  const snare = has('snare') && !over ? Math.exp(-since(s, s.snare, t) * 9) : 0;
+  const over = t >= g.length;
+  const all = g.dropping;
+  const has = (id: LayerId) => (all || g.layers > s.layers.indexOf(id)) && t > g.tempo.timeAt(s.intro * 16);
+  const kick = over ? 0 : Math.exp(-since(g, s.kick, t) * 7);
+  const hat = has('hat') && !over ? Math.exp(-since(g, s.hat, t) * 12) : 0;
+  const snare = has('snare') && !over ? Math.exp(-since(g, s.snare, t) * 9) : 0;
   let bass = kick * 0.5, mid = 0.3 * (snare + hat), high = hat * 0.6;
   if (live && audio.analyser && audio.running) {
     // 256 bins over 0..sampleRate/2: log-spaced groups for the skyline, three bands for the rest
@@ -365,7 +454,7 @@ function beatOf(g: Game | null, dt: number, live: boolean): Beat {
     }
   }
   grooveK += ((g.groove ? 1 : 0) - grooveK) * damp(4, dt);
-  return { kick, snare, hat, bass, mid, high, energy: g.layers / s.layers.length, groove: grooveK, scroll: t / s.beat, spec };
+  return { kick, snare, hat, bass, mid, high, energy: all ? 1 : g.layers / s.layers.length, groove: grooveK, scroll: g.tempo.stepAt(t) / 4, spec };
 }
 
 // ------------------------------------------------------------ loop
@@ -396,6 +485,10 @@ function frame(nowMs: number) {
         n++;
       }
       handleEvents(game);
+      if (tipUntil && performance.now() > tipUntil && hintStage !== 3) {
+        ui.hint(null);
+        tipUntil = 0;
+      }
       if (hintStage === 3 && performance.now() > hintUntil) {
         ui.hint(null);
         hintStage = 2;
@@ -403,6 +496,7 @@ function frame(nowMs: number) {
     }
     shown = game;
     ui.updateHud(game);
+    ui.setFx(fxItems(game));
   } else if (mode === 'pause' && game) {
     shown = game;
   } else {

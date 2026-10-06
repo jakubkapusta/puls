@@ -6,7 +6,7 @@
 import { Program, Target, DynBuffer, type GL } from '../gl/gl';
 import * as S from './shaders';
 import { BAL, FIELD_H, FIELD_W } from '../game/balance';
-import type { Game, GameEvent } from '../game/game';
+import type { Game, GameEvent, PowerId, SpecialId } from '../game/game';
 import type { LayerId } from '../music/song';
 import { clamp, damp, lerp } from '../core/math';
 
@@ -46,6 +46,10 @@ export function rowColor(k: number): RGB {
   return k < 0.5 ? m(a, b, k * 2) : m(b, c, (k - 0.5) * 2);
 }
 const HARD: RGB = [1.6, 1.15, 0.45];
+export const POWER_COLOR: Record<PowerId, RGB> = {
+  multi: [1.5, 0.5, 1.4], laser: [1.6, 0.35, 0.3], wide: [0.35, 1.4, 0.7], magnet: [0.5, 0.7, 1.7], slow: [1.5, 1.2, 0.35],
+};
+const DROP: RGB = [1.9, 1.7, 1.9];
 const mul = (c: RGB, k: number): RGB => [c[0] * k, c[1] * k, c[2] * k];
 
 export class Renderer {
@@ -83,6 +87,8 @@ export class Renderer {
   private glitch = 0;
   private shake = 0;
   private fireworks = 0;
+  private dim = 0;
+  private dropSeen = false;
   private rnd = 12345;
   private lastT = 0;
   private time = 0;
@@ -179,6 +185,8 @@ export class Renderer {
     this.sweeps.length = 0;
     this.lay.fill(0);
     this.fireworks = 0;
+    this.dropSeen = false;
+    this.dim = 0;
   }
 
   // ------------------------------------------------------------ effects from game events
@@ -230,6 +238,39 @@ export class Renderer {
         this.shake = Math.max(this.shake, 9);
         this.ca = Math.max(this.ca, 1);
         this.shock(clamp(g.bx, 0, FIELD_W), 0, 0.8);
+        break;
+      case 'special': {
+        const b = e.brick;
+        const c = rowColor(b.rowUp / Math.max(1, g.song.rows.length - 1));
+        if (e.special === 'chord') for (let k = 0; k < 3; k++) this.rings.push({ x: b.x, y: b.y, t0: t + k * 0.06, dur: 0.6, r0: 20, r1: 120 + k * 40, c, thick: 2, a: 0.8 });
+        if (e.special === 'echo') for (let k = 0; k < 3; k++) this.rings.push({ x: b.x, y: b.y, t0: t + k * 0.15, dur: 0.7, r0: 20, r1: 160, c: [0.8, 0.9, 1.6], thick: 1.5, a: 0.7 });
+        if (e.special === 'tempoUp' || e.special === 'tempoDown') this.sweeps.push({ y: b.y, t0: t, c: [1.4, 1.2, 0.5] });
+        if (e.special === 'perc') this.shock(b.x, b.y, 0.35);
+        break;
+      }
+      case 'filter':
+        this.dim = 1;
+        break;
+      case 'drop':
+        this.shake = Math.max(this.shake, 4);
+        break;
+      case 'dropArm':
+        this.flash = Math.max(this.flash, 0.05);
+        break;
+      case 'power': {
+        const c = POWER_COLOR[e.kind];
+        this.rings.push({ x: g.px, y: BAL.paddle.y, t0: t, dur: 0.5, r0: 30, r1: 200, c, thick: 2.5, a: 0.9 });
+        this.sparkBurst(e.x, e.y, c, 18, 380, true);
+        break;
+      }
+      case 'laser':
+        this.sparkBurst(e.x, e.y, POWER_COLOR.laser, 3, 160, true);
+        break;
+      case 'extraGone':
+        this.sparkBurst(e.x, e.y, [0.7, 0.8, 1.4], 8, 200);
+        break;
+      case 'saved':
+        this.rings.push({ x: g.bx, y: g.by, t0: t, dur: 0.5, r0: 10, r1: 90, c: POWER_COLOR.multi, thick: 2, a: 0.8 });
         break;
       case 'clear':
         this.flash = 0.3;
@@ -307,8 +348,9 @@ export class Renderer {
     this.scene.bind();
     gl.disable(gl.BLEND);
     const hz = (this.y0 + 560 * this.s) / this.H;
-    const songT = g ? Math.max(0, g.t) : this.time;
-    this.pBg.use().f2('u_res', this.W, this.H).f1('u_time', this.time).f1('u_songT', songT).f1('u_s16', g ? g.song.s16 : 0.15)
+    // the laser fan counts 16ths: pass the step as "time" with a 16th of 1
+    const step16 = g ? Math.max(0, g.tempo.stepAt(g.t)) : this.time / 0.15;
+    this.pBg.use().f2('u_res', this.W, this.H).f1('u_time', this.time).f1('u_songT', step16).f1('u_s16', 1)
       .f1('u_scroll', beat.scroll).f1('u_kick', beat.kick).f1('u_snare', beat.snare).f1('u_hat', beat.hat)
       .f1('u_bass', beat.bass).f1('u_mid', beat.mid).f1('u_high', beat.high).f1('u_energy', beat.energy).f1('u_groove', beat.groove)
       .f4('u_layA', this.lay[0], this.lay[1], this.lay[2], this.lay[3]).f2('u_layB', this.lay[4], this.lay[5])
@@ -334,6 +376,7 @@ export class Renderer {
     }
 
     this.flash *= Math.exp(-rdt * 12);
+    this.dim *= Math.exp(-rdt * 0.9);
     this.tint *= Math.exp(-rdt * 3);
     this.ca *= Math.exp(-rdt * 6);
     this.glitch *= Math.exp(-rdt * 5);
@@ -356,6 +399,19 @@ export class Renderer {
     const gdt = clamp(t - this.gameT, 0, 0.1);
     this.gameT = t;
     const nRows = Math.max(1, g.song.rows.length - 1);
+    // the drop lands: a blast; while it lasts every kick hits the camera
+    if (g.dropping) {
+      if (!this.dropSeen) {
+        this.dropSeen = true;
+        this.flash = 0.35;
+        this.ca = 1.4;
+        this.shake = 14;
+        this.shock(FIELD_W / 2, FIELD_H * 0.55, 1.6);
+        this.shock(g.px, BAL.paddle.y, 1);
+      }
+      this.ca = Math.max(this.ca, beat.kick * 0.5);
+      this.shake = Math.max(this.shake, beat.kick * 3);
+    }
     // a note sounding lights its brick (or the gap it left) on time with the audio
     for (const p of this.pulses) {
       if (p.done || t < p.t) continue;
@@ -380,9 +436,14 @@ export class Renderer {
       const pulse = this.pulses.find((p) => p.done && p.id === br.id);
       const sing = pulse ? Math.exp(-(t - pulse.t) * 8) : 0;
       const k = 0.85 + hit * 1.5 + sing * 1.2 + beat.kick * 0.12 + beat.groove * 0.15;
-      // a hit brick jolts
-      const jx = hit * Math.sin(t * 90) * 2.5;
-      this.box(br.x + jx, br.y, br.w / 2, br.h / 2, 6, br.kind === 'hard' ? 3 : 1, 9, br.hp / br.maxHp, mul(c, k), 1);
+      // a hit brick jolts; everything shakes during the drop
+      const jx = hit * Math.sin(t * 90) * 2.5 + (g.dropping ? Math.sin(t * 60 + br.id) * beat.kick * 3 : 0);
+      if (br.special === 'drop') {
+        // drop bricks: white-hot, pulsing with the kick
+        const dk = 0.9 + beat.kick * 0.8 + 0.3 * Math.sin(this.time * 6 + br.id);
+        this.box(br.x + jx, br.y, br.w / 2, br.h / 2, 6, 1, 14, 1, mul(DROP, dk * k * 0.7), 1);
+      } else this.box(br.x + jx, br.y, br.w / 2, br.h / 2, 6, br.kind === 'hard' ? 3 : 1, 9, br.hp / br.maxHp, mul(c, k), 1);
+      if (br.special) this.glyph(br.special, br.x + jx, br.y, br.special === 'drop' ? [2.2, 2, 2.2] : mul([1.4, 1.4, 1.5], 0.7 + sing * 0.8 + hit * 0.8));
     }
 
     // rings
@@ -400,9 +461,46 @@ export class Renderer {
     const pc: RGB = g.groove ? [1.5, 0.45, 1.5] : [0.3, 1.1, 1.5];
     const pk = 1 + swingK * 0.5 + beat.kick * 0.2;
     const py = P.y + lift;
-    this.box(g.px, py, P.w / 2, P.h / 2, P.h / 2, 1, 9, 0, mul(pc, pk), 1);
-    this.box(g.px, py + P.h * 0.18, P.w / 2 - 10, 2, 2, 0, 4, 0, mul([1.2, 1.2, 1.4], 0.7 + swingK * 0.4), 0.9, 0, 1);
-    if (swingK > 0.05) this.box(g.px, py - P.h * 0.8, P.w / 2 * (0.6 + swingK * 0.4), 2, 2, 0, 6, 0, mul(pc, swingK * 0.7), 1, 0, 1);
+    const pw = g.paddleW;
+    const pcol: RGB = g.active('laser') ? POWER_COLOR.laser : g.active('magnet') ? POWER_COLOR.magnet : pc;
+    this.box(g.px, py, pw / 2, P.h / 2, P.h / 2, 1, 9, 0, mul(pcol, pk), 1);
+    this.box(g.px, py + P.h * 0.18, pw / 2 - 10, 2, 2, 0, 4, 0, mul([1.2, 1.2, 1.4], 0.7 + swingK * 0.4), 0.9, 0, 1);
+    if (swingK > 0.05) this.box(g.px, py - P.h * 0.8, pw / 2 * (0.6 + swingK * 0.4), 2, 2, 0, 6, 0, mul(pc, swingK * 0.7), 1, 0, 1);
+    if (g.active('laser')) {
+      for (const sx of [-1, 1]) this.box(g.px + sx * (pw / 2 - 10), py + P.h * 0.7, 4, 7, 2, 0, 6, 0, mul(POWER_COLOR.laser, 1.2), 1);
+    }
+    if (g.active('magnet')) {
+      const mk = 0.5 + 0.5 * Math.sin(this.time * 8);
+      for (let k = 0; k < 2; k++) {
+        const r = 22 + ((this.time * 40 + k * 20) % 40);
+        this.box(g.px, py + 8, r * 1.8, r * 0.5, r * 0.5, 2, 4, 1, mul(POWER_COLOR.magnet, 0.6), (1 - (r - 22) / 40) * (0.4 + 0.3 * mk), 0, 1);
+      }
+    }
+    // laser shots
+    for (const sh of g.shots) this.box(sh.x, sh.y + 18, 2.5, 22, 2.5, 0, 8, 0, mul(POWER_COLOR.laser, 1.6), 1, 0, 1);
+    // falling power-ups: a glass capsule with a glyph
+    for (const pw2 of g.powers) {
+      const c = POWER_COLOR[pw2.kind];
+      const bob = 1 + 0.15 * Math.sin(this.time * 10 + pw2.id);
+      this.box(pw2.x, pw2.y, 30, 13, 13, 1, 10, 0, mul(c, bob), 1);
+      this.powerGlyph(pw2.kind, pw2.x, pw2.y);
+    }
+    // extra balls (echo clones fade out, multiball balls stay)
+    for (const e of g.extras) {
+      const R = BAL.ball.r;
+      const fade = e.kind === 'echo' ? clamp((e.until - t) / 1.2, 0, 1) : 1;
+      const ec: RGB = e.kind === 'echo' ? [0.6, 0.8, 1.6] : POWER_COLOR.multi;
+      const n = e.trail.length;
+      for (let i = 1; i < n; i++) {
+        const a = e.trail[i - 1], p = e.trail[i];
+        const dx = p.x - a.x, dy = p.y - a.y, len = Math.hypot(dx, dy);
+        if (len < 0.01 || len > 200) continue;
+        const k = i / n, w = R * (0.1 + 0.35 * k * k);
+        this.box((a.x + p.x) / 2, (a.y + p.y) / 2, len / 2 + w, w, w, 0, 3, 0, mul(ec, 0.3 * k), k * 0.6 * fade, Math.atan2(dy, dx), 1);
+      }
+      this.box(e.x, e.y, R * 0.85, R * 0.85, R * 0.85, 0, 5, 0, mul(ec, 0.9), fade * (e.kind === 'echo' ? 0.75 : 1));
+      this.box(e.x, e.y, R * 0.45, R * 0.45, R * 0.45, 0, 0, 0, [1.4, 1.4, 1.5], fade);
+    }
 
     // the landing ring (test option, off by default)
     const L = g.landing;
@@ -422,19 +520,20 @@ export class Renderer {
       const R = BAL.ball.r;
       const tr = g.trail;
       const n = tr.length;
-      for (let i = 1; i < n; i++) {
+      // only the last few positions: a short streak, not a comet
+      for (let i = Math.max(1, n - 18); i < n; i++) {
         const a = tr[i - 1], p = tr[i];
-        const k = i / n;
+        const k = (i - (n - 18)) / 18;
         const dx = p.x - a.x, dy = p.y - a.y, len = Math.hypot(dx, dy);
         if (len < 0.01 || len > 200) continue;
         const tc = HEAT[Math.min(HEAT.length - 1, p.heat)];
-        const w = R * (0.1 + 0.45 * k * k);
-        this.box((a.x + p.x) / 2, (a.y + p.y) / 2, len / 2 + w, w, w, 0, 3 + p.heat, 0, mul(tc, 0.25 + 0.35 * k), k * 0.7, Math.atan2(dy, dx), 1);
+        const w = R * (0.08 + 0.32 * k * k);
+        this.box((a.x + p.x) / 2, (a.y + p.y) / 2, len / 2 + w, w, w, 0, 2, 0, mul(tc, 0.12 + 0.22 * k), k * 0.6, Math.atan2(dy, dx), 1);
       }
       const hc = HEAT[Math.min(HEAT.length - 1, g.heat)];
       const pierce = g.heat >= BAL.heat.pierce;
       // a crisp ball first: the halo stays small so it never turns into a comet
-      this.box(g.bx, g.by, R, R, R, 0, 6 + g.heat * 1.5, 0, mul(hc, 0.85), 1);
+      this.box(g.bx, g.by, R, R, R, 0, 5 + g.heat, 0, mul(hc, 0.7), 1);
       this.box(g.bx, g.by, R * 0.6, R * 0.6, R * 0.6, 0, 0, 0, [1.6, 1.6, 1.6], 1);
       if (pierce) {
         const pr = R * (1.7 + 0.2 * Math.sin(this.time * 30));
@@ -498,6 +597,67 @@ export class Renderer {
     ps.length = w;
   }
 
+  /** a little sign on a special brick, drawn with the same neon shapes */
+  private glyph(sp: SpecialId, x: number, y: number, c: RGB) {
+    const L = (dx: number, dy: number, hw: number, hh: number, rot = 0) => this.box(x + dx, y + dy, hw, hh, Math.min(hw, hh), 0, 3, 0, c, 1, rot, 1);
+    switch (sp) {
+      case 'chord': // three stacked notes
+        for (let k = -1; k <= 1; k++) L(0, k * 7, 12, 1.6);
+        break;
+      case 'perc': // a drum: ring
+        this.box(x, y, 9, 9, 9, 2, 3, 1.4, c, 1, 0, 1);
+        L(0, 0, 2, 2);
+        break;
+      case 'arp': // a staircase
+        for (let k = 0; k < 4; k++) L(-12 + k * 8, -6 + k * 4, 2.2, 3 + k * 2.2);
+        break;
+      case 'filter': // a closing slope
+        for (let k = 0; k < 5; k++) L(-14 + k * 7, 4 - (k * k) * 0.9, 2.2, 1.6 + (4 - k) * 1.2);
+        break;
+      case 'echo': // two rings
+        this.box(x - 5, y, 7, 7, 7, 2, 3, 1.2, c, 1, 0, 1);
+        this.box(x + 6, y, 7, 7, 7, 2, 3, 1.2, mul(c, 0.6), 1, 0, 1);
+        break;
+      case 'tempoUp':
+      case 'tempoDown': { // a metronome arm and its triangle
+        const up = sp === 'tempoUp';
+        this.box(x, y, 8, 8, 0, 4, 3, 0, mul(c, 0.8), 1, up ? Math.PI * 0.75 : -Math.PI * 0.25, 1);
+        L(up ? 10 : -10, 0, 1.4, 9, up ? -0.4 : 0.4);
+        break;
+      }
+      case 'drop': // an arrow down
+        L(0, 5, 2, 7);
+        this.box(x, y - 5, 7, 7, 0, 4, 3, 0, c, 1, -Math.PI * 0.75, 1);
+        break;
+    }
+  }
+
+  private powerGlyph(kind: PowerId, x: number, y: number) {
+    const c: RGB = [1.8, 1.8, 1.9];
+    const L = (dx: number, dy: number, hw: number, hh: number) => this.box(x + dx, y + dy, hw, hh, Math.min(hw, hh), 0, 2, 0, c, 1, 0, 1);
+    switch (kind) {
+      case 'multi':
+        for (let k = -1; k <= 1; k++) L(k * 9, 0, 3, 3);
+        break;
+      case 'laser':
+        L(-7, 0, 1.6, 7);
+        L(7, 0, 1.6, 7);
+        break;
+      case 'wide':
+        L(0, 0, 12, 2);
+        this.box(x - 16, y, 4, 4, 0, 4, 2, 0, c, 1, Math.PI * 0.25, 1);
+        this.box(x + 16, y, 4, 4, 0, 4, 2, 0, c, 1, -Math.PI * 0.75, 1);
+        break;
+      case 'magnet':
+        this.box(x, y + 1, 9, 7, 7, 2, 2, 1.6, c, 1, 0, 1);
+        break;
+      case 'slow':
+        this.box(x, y + 4, 5, 5, 0, 4, 2, 0, c, 1, Math.PI * 0.75, 1);
+        this.box(x, y - 4, 5, 5, 0, 4, 2, 0, c, 1, -Math.PI * 0.25, 1);
+        break;
+    }
+  }
+
   private box(x: number, y: number, hw: number, hh: number, r: number, kind: number, glow: number, extra: number, c: RGB, a: number,
     rot = 0, add = 0, fx = 1, fy = 1) {
     if (!Number.isFinite(x + y + hw + hh + c[0] + c[1] + c[2] + a + rot)) return;
@@ -540,7 +700,7 @@ export class Renderer {
     const p = this.pComp.use().tex('u_scene', 0, this.scene.tex).tex('u_bloom', 1, this.bloom[0].tex)
       .f2('u_res', this.W, this.H).f1('u_time', this.time).f1('u_bloomAmt', this.bloomAmt).f1('u_ca', this.ca * 0.012)
       .f1('u_flash', this.flash).f3('u_tint', this.tint * 0.12, 0, this.tint * 0.02)
-      .f1('u_zoom', zoom).f2('u_shake', (this.r() - 0.5) * sh, (this.r() - 0.5) * sh).f1('u_glitch', this.glitch);
+      .f1('u_dim', this.dim * 0.55).f1('u_zoom', zoom).f2('u_shake', (this.r() - 0.5) * sh, (this.r() - 0.5) * sh).f1('u_glitch', this.glitch);
     this.shocks = this.shocks.filter((s) => this.time - s.t0 < s.dur);
     for (let i = 0; i < 4; i++) {
       const s = this.shocks[i];

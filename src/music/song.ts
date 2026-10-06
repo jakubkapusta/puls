@@ -30,6 +30,11 @@ export type SongDef = {
    * Read left to right a row is a phrase.
    */
   rows: string[];
+  /**
+   * Special bricks, same shape as `rows` ('.' = plain): A akord, P perkusja, R arpeggiator,
+   * F filtr, E echo, M metronom w górę, m metronom w dół, D drop.
+   */
+  specials?: string[];
   /** scale step (across octaves) of '1' in the bottom row, and how far each row up moves it */
   rowBase: number;
   rowStep: number;

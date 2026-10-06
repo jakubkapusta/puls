@@ -11,6 +11,7 @@
 
 import { midiHz, scaleNote, type Song, type LayerId } from '../music/song';
 import type { Game, GameEvent } from '../game/game';
+import { BAL } from '../game/balance';
 
 const LOOKAHEAD = 0.12;
 const TICK_MS = 20;
@@ -117,7 +118,7 @@ export class Audio {
 
     // dotted-8th echo, darkened in the feedback
     const dl = ctx.createDelay(2);
-    const fb = ctx.createGain();
+    const fb = (this.fb = ctx.createGain());
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = 2600;
@@ -134,6 +135,7 @@ export class Audio {
     for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
   }
   private delayNode: DelayNode | null = null;
+  private fb: GainNode | null = null;
 
   get running() {
     return !!this.ctx && this.ctx.state === 'running';
@@ -197,8 +199,9 @@ export class Audio {
     this.stopped = false;
     this.filt.frequency.cancelScheduledValues(ctx.currentTime);
     this.filt.frequency.setValueAtTime(380, this.start);
-    this.filt.frequency.exponentialRampToValueAtTime(20000, this.start + song.intro * song.bar);
+    this.filt.frequency.exponentialRampToValueAtTime(20000, this.start + game.tempo.timeAt(song.intro * 16));
     if (this.delayNode) this.delayNode.delayTime.value = song.s16 * 3;
+    this.lastS16 = song.s16;
     clearInterval(this.timer);
     this.timer = window.setInterval(() => this.schedule(), TICK_MS);
     this.schedule();
@@ -243,7 +246,7 @@ export class Audio {
         return;
       }
       this.stepI++;
-      this.stepT = this.start + this.stepI * song.s16;
+      this.stepT = this.start + this.game!.tempo.timeAt(this.stepI);
     }
     // forget old beat marks
     while (this.beats.length && this.beats[0].t < ctx.currentTime - 2) this.beats.shift();
@@ -255,9 +258,16 @@ export class Audio {
     const bar = Math.floor(i / 16), s = i % 16;
     const chord = song.chords[bar % song.chords.length];
     const croot = song.root + chord.root;
+    // the tempo map can change mid-song (Metronom bricks, the slow-down power-up)
+    const s16 = g.tempo.s16At(T - this.start + 1e-6);
+    const beat = s16 * 4;
+    if (s16 !== this.lastS16 && this.delayNode) {
+      this.delayNode.delayTime.setValueAtTime(s16 * 3, T);
+      this.lastS16 = s16;
+    }
 
     if (this.finaleStep >= 0 && i >= this.finaleStep) {
-      this.finale(T, chord, croot);
+      this.finale(T, chord, croot, s16);
       return false;
     }
     if (i >= song.bars * 16) {
@@ -266,29 +276,37 @@ export class Audio {
     }
 
     const intro = bar < song.intro;
-    const on = new Set<LayerId>(intro ? [] : song.layers.slice(0, g.layers));
+    const drop = g.dropStep >= 0 && i >= g.dropStep && i < g.dropStep + 16 * BAL.drop.bars;
+    const on = new Set<LayerId>(intro ? [] : drop ? song.layers : song.layers.slice(0, g.layers));
     const pat = (p: string) => p[s] ?? '.';
+    const heardT = T - this.start;
 
-    // kick (always)
+    if (drop && i === g.dropStep) this.dropHit(T, croot);
+
+    // kick (always; the drop doubles it on the offbeat 8ths of the last beat)
     const k = pat(song.kick);
-    if (k !== '.') {
-      this.kick(T, k === 'o' ? 1 : 0.9);
-      this.pump(T, song.beat * 0.55);
+    if (k !== '.' || (drop && s === 14)) {
+      this.kick(T, k === 'o' || drop ? 1 : 0.9);
+      this.pump(T, beat * 0.55);
       this.beats.push({ t: T, kind: 'kick' });
+      if (drop) this.sub(T, croot - 12, beat * 0.9);
     }
     // bass (always); the bass2 layer drives it in 16ths
     const bch = on.has('bass2') ? (pat(song.bass) === '.' ? 'x' : pat(song.bass)) : pat(song.bass);
     if (bch !== '.') {
       const m = croot + (bch === 'o' ? 12 : bch === '5' ? 7 : 0);
-      this.bass(T, m, song.s16 * (on.has('bass2') ? 0.9 : 1.7), on.has('bass2') ? 0.85 : 1);
+      this.bass(T, m, s16 * (on.has('bass2') ? 0.9 : 1.7), on.has('bass2') ? 0.85 : 1);
     }
     if (on.has('hat') && pat(song.hat) !== '.') {
       this.hat(T, 0.5, true);
       this.beats.push({ t: T, kind: 'hat' });
     }
     if (on.has('snare')) {
-      const fill = bar % 8 === 7 && s >= 12;
-      if (fill) this.snare(T, 0.35 + (s - 12) * 0.15);
+      // fills: every 8th bar, the bar after a Perkusja brick, and the bar before a drop
+      const fillBar = bar % 8 === 7 || bar === this.fillBar || (g.dropStep >= 0 && bar === g.dropStep / 16 - 1);
+      const roll = g.dropStep >= 0 && bar === g.dropStep / 16 - 1;
+      if (roll) this.snare(T, 0.2 + (s / 16) * 0.8);
+      else if (fillBar && s >= 12) this.snare(T, 0.35 + (s - 12) * 0.15);
       else if (pat(song.snare) !== '.') {
         this.snare(T, 1);
         this.beats.push({ t: T, kind: 'snare' });
@@ -299,7 +317,7 @@ export class Audio {
       if (c === 'x') this.hat(T, 0.22, false);
       else if (c === 'o') this.clap(T, 0.5);
     }
-    if (on.has('pad') && s === 0) this.pad(T, chord.tones.map((t) => croot + 24 + t), song.bar * 0.98);
+    if (on.has('pad') && s === 0) this.pad(T, chord.tones.map((t) => croot + 24 + t), s16 * 16 * 0.98);
     if (on.has('arp')) {
       const c = pat(song.arp);
       if (c !== '.') {
@@ -307,17 +325,26 @@ export class Audio {
         this.arp(T, croot + 24 + chord.tones[idx % n] + 12 * Math.floor(idx / n));
       }
     }
-    if (g.groove && !intro) {
+    if ((g.groove || drop) && !intro) {
       const line = song.lead[bar % song.lead.length];
       const c = line[s];
       if (c && c !== '.' && c !== '-') {
         let len = 1;
         while (line[s + len] === '-') len++;
-        this.lead(T, scaleNote(song, song.leadBase + parseInt(c, 36)), len * song.s16);
+        this.lead(T, scaleNote(song, song.leadBase + parseInt(c, 36)), len * s16);
       }
+    }
+    // the laser power-up: the paddle fires on every 8th and each shot is a staccato chord tone
+    // (the game fires on the same even 16ths, so shot and sound land together)
+    if (s % 2 === 0 && heardT < g.fx.laser) {
+      const n = chord.tones.length;
+      this.zap(T, croot + 36 + chord.tones[(i / 2) % n]);
     }
     return true;
   }
+  private lastS16 = 0;
+  /** a drum fill on this bar (after a Perkusja brick) */
+  private fillBar = -1;
 
   // ------------------------------------------------------------ game events
   onEvent(e: GameEvent) {
@@ -326,7 +353,8 @@ export class Audio {
     switch (e.type) {
       case 'brick': {
         const t = this.quantize(GRACE);
-        this.brick(t, e.midi, e.heat, e.pierce);
+        if (e.chord) for (const m of e.chord) this.brick(t, m, Math.max(e.heat, 2), false, 0.6);
+        else this.brick(t, e.midi, e.heat, e.pierce);
         this.noteTimes.push({ id: e.brick.id, t });
         if (this.noteTimes.length > 64) this.noteTimes.shift();
         break;
@@ -346,7 +374,30 @@ export class Audio {
         this.tick(this.quantize(GRACE), 0.5);
         break;
       case 'row':
+      case 'layer':
         this.sparkle(this.quantize(GRACE));
+        break;
+      case 'special':
+        if (e.special === 'perc') this.fillBar = Math.floor(this.game!.tempo.stepAt(ctx.currentTime - this.start) / 16) + 1;
+        if (e.special === 'tempoUp' || e.special === 'tempoDown') this.tickTock(this.quantize(GRACE), e.special === 'tempoUp');
+        break;
+      case 'filter':
+        this.sweep();
+        break;
+      case 'echo':
+        this.echoBoost();
+        break;
+      case 'dropArm':
+        this.bell(this.quantize(GRACE), scaleNote(this.song, 18 + (e.total - e.left) * 2), 0.08);
+        break;
+      case 'drop':
+        this.riser(this.start + this.game!.tempo.timeAt(e.atStep));
+        break;
+      case 'power':
+        this.sparkle(this.quantize(GRACE), 6);
+        break;
+      case 'saved':
+        this.bell(this.quantize(GRACE), scaleNote(this.song, 20), 0.07);
         break;
       case 'lost':
         this.dip();
@@ -354,8 +405,9 @@ export class Audio {
       case 'clear': {
         // the finale lands on the next downbeat (the game ends the level a bar after it)
         const song = this.song;
-        const pos = (ctx.currentTime + 0.03 - this.start) / song.s16;
+        const pos = this.game!.tempo.stepAt(ctx.currentTime + 0.03 - this.start);
         this.finaleStep = Math.max(this.stepI, Math.ceil(pos / 16) * 16);
+        void song;
         break;
       }
       case 'end':
@@ -376,12 +428,12 @@ export class Audio {
 
   /** The earliest grid-aligned ctx time from now (a 16th, or now if a grid point just passed). */
   private quantize(grace: number) {
-    const ctx = this.ctx!, song = this.song!;
+    const ctx = this.ctx!, tempo = this.game!.tempo;
     const earliest = ctx.currentTime + 0.01;
-    const pos = (earliest - this.start) / song.s16;
+    const pos = tempo.stepAt(earliest - this.start);
     const prev = Math.floor(pos);
-    if ((pos - prev) * song.s16 <= grace) return earliest;
-    return this.start + (prev + 1) * song.s16;
+    if (earliest - this.start - tempo.timeAt(prev) <= grace) return earliest;
+    return this.start + tempo.timeAt(prev + 1);
   }
 
   // ------------------------------------------------------------ voices
@@ -547,9 +599,9 @@ export class Audio {
   }
 
   /** a brick: a plucked note, brighter and fuller as the ball heats up */
-  private brick(t: number, m: number, heat: number, pierce: boolean) {
+  private brick(t: number, m: number, heat: number, pierce: boolean, vol = 1) {
     const g = this.gain(this.notes);
-    this.env(g.gain, t, 0.2, 0.003, 0.55 + heat * 0.05);
+    this.env(g.gain, t, 0.2 * vol, 0.003, 0.55 + heat * 0.05);
     g.connect(this.gain(this.delay, 0.45));
     g.connect(this.gain(this.verb, 0.35));
     const lp = this.filter('lowpass', 900, 6, g);
@@ -579,7 +631,7 @@ export class Audio {
     this.clap(t, perfect ? 0.7 : 0.45);
     if (perfect) {
       const song = this.song!;
-      const bar = Math.floor((t - this.start) / song.bar);
+      const bar = Math.floor(this.game!.tempo.stepAt(t - this.start) / 16);
       const ch = song.chords[((bar % song.chords.length) + song.chords.length) % song.chords.length];
       this.bell(t, song.root + ch.root + 36 + (heat >= 3 ? 12 : 0), 0.06);
     }
@@ -600,15 +652,91 @@ export class Audio {
     this.noiseSrc(t, 0.12, bp);
   }
 
-  private sparkle(t: number) {
+  private sparkle(t: number, n = 4) {
     const song = this.song!;
-    for (let k = 0; k < 4; k++) this.bell(t + k * song.s16, scaleNote(song, 15 + k * 2), 0.045);
+    const s16 = this.game!.tempo.s16At(t - this.start);
+    for (let k = 0; k < n; k++) this.bell(t + k * s16, scaleNote(song, 15 + k * 2), 0.045);
+  }
+
+  /** the Filtr brick: the whole mix closes over a beat and opens again over two */
+  private sweep() {
+    const ctx = this.ctx!, f = this.filt.frequency, t = ctx.currentTime;
+    const beat = this.game!.tempo.s16At(t - this.start) * 4;
+    f.cancelScheduledValues(t);
+    f.setValueAtTime(Math.min(20000, f.value), t);
+    f.exponentialRampToValueAtTime(260, t + beat);
+    f.setValueAtTime(260, t + beat * 1.5);
+    f.exponentialRampToValueAtTime(20000, t + beat * 3.5);
+  }
+
+  /** the Echo brick: the echo feeds back longer for a while */
+  private echoBoost() {
+    if (!this.fb) return;
+    const t = this.ctx!.currentTime, g = this.fb.gain;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(0.62, t + 0.1);
+    g.setValueAtTime(0.62, t + BAL.special.echoTime - 1);
+    g.linearRampToValueAtTime(0.38, t + BAL.special.echoTime);
+  }
+
+  /** Metronom: a woodblock pair, up or down */
+  private tickTock(t: number, up: boolean) {
+    const s16 = this.game!.tempo.s16At(t - this.start);
+    for (let k = 0; k < 2; k++) {
+      const g = this.gain(this.sfx);
+      this.env(g.gain, t + k * s16 * 2, 0.16, 0.001, 0.08);
+      this.osc('sine', (up ? [900, 1200] : [1200, 900])[k], t + k * s16 * 2, 0.1, this.filter('bandpass', 1000, 3, g));
+    }
+  }
+
+  /** the laser power-up: a short staccato blip */
+  private zap(t: number, m: number) {
+    const g = this.gain(this.notes);
+    this.env(g.gain, t, 0.09, 0.002, 0.07);
+    g.connect(this.gain(this.delay, 0.3));
+    const f = midiHz(m);
+    const o = this.osc('square', f * 2, t, 0.1, this.filter('lowpass', 5000, 2, g));
+    o.frequency.exponentialRampToValueAtTime(f, t + 0.06);
+  }
+
+  /** before the drop: noise rising into it */
+  private riser(at: number) {
+    const ctx = this.ctx!, t = ctx.currentTime + 0.01;
+    if (at <= t + 0.1) return;
+    const g = this.gain(this.drums);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, at - 0.01);
+    g.gain.linearRampToValueAtTime(0, at + 0.02);
+    const bp = this.filter('bandpass', 400, 3, g);
+    bp.frequency.setValueAtTime(400, t);
+    bp.frequency.exponentialRampToValueAtTime(7000, at);
+    this.noiseSrc(t, at - t + 0.05, bp);
+  }
+
+  /** the drop lands: crash, a deep hit and a chord stab */
+  private dropHit(T: number, croot: number) {
+    this.crash(T);
+    this.sub(T, croot - 12, 1.2);
+    const g = this.gain(this.drums);
+    this.env(g.gain, T, 0.5, 0.002, 0.6);
+    const o = this.osc('sine', 120, T, 0.7, g);
+    o.frequency.exponentialRampToValueAtTime(30, T + 0.5);
+  }
+
+  /** a sub bass under the drop */
+  private sub(t: number, m: number, dur: number) {
+    const g = this.gain(this.music);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.3, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    this.osc('sine', midiHz(m), t, dur, g);
   }
 
   /** a lost ball: the whole mix sinks under a closing filter and comes back */
   private dip() {
     const ctx = this.ctx!, f = this.filt.frequency, t = ctx.currentTime;
-    const beat = this.song?.beat ?? 0.5;
+    const beat = this.game ? this.game.tempo.s16At(t - this.start) * 4 : 0.5;
     f.cancelScheduledValues(t);
     f.setValueAtTime(Math.min(20000, f.value), t);
     f.exponentialRampToValueAtTime(320, t + 0.18);
@@ -627,16 +755,15 @@ export class Audio {
     this.bass(T, root + chord.root, 1.6, 1);
   }
 
-  private finale(T: number, chord: { root: number; tones: number[] }, croot: number) {
-    const song = this.song!;
+  private finale(T: number, chord: { root: number; tones: number[] }, croot: number, s16: number) {
     this.kick(T, 1);
     this.crash(T);
     this.snare(T, 1);
-    this.pad(T, chord.tones.map((t) => croot + 24 + t), song.bar * 1.5);
-    this.bass(T, croot, song.bar, 1);
+    this.pad(T, chord.tones.map((t) => croot + 24 + t), s16 * 24);
+    this.bass(T, croot, s16 * 16, 1);
     for (let k = 0; k < 8; k++) {
       const idx = k % chord.tones.length;
-      this.bell(T + k * song.s16, croot + 36 + chord.tones[idx] + 12 * Math.floor(k / chord.tones.length), 0.06);
+      this.bell(T + k * s16, croot + 36 + chord.tones[idx] + 12 * Math.floor(k / chord.tones.length), 0.06);
     }
   }
 

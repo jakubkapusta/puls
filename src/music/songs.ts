@@ -33,6 +33,18 @@ export const NIGHT_DRIVE: Song = makeSong({
     '.2.44.2.',
     '..3..3..',
   ],
+  specials: [
+    '..D..D..',
+    '.A....A.',
+    '...R....',
+    '........',
+    'E......F',
+    '...M....',
+    '........',
+    '.P....D.',
+    '....m...',
+    '........',
+  ],
   rowBase: 3, // E3
   rowStep: 1,
   layers: ['hat', 'snare', 'pad', 'arp', 'bass2', 'perc'],
