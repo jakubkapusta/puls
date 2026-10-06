@@ -165,7 +165,7 @@ Wszystko proceduralne, surowy WebGL2, jak w Roju i Fali.
 
 ## Technicznie
 
-- **Repozytorium:** `~/code/puls`, origin poda właściciel. GitHub Pages z `dist/` (workflow z Fali).
+- **Repozytorium:** `~/code/puls`, repo `jakubkapusta/puls`. GitHub Pages z `dist/` (workflow z Fali).
 - **Stack:** Vite, TypeScript, surowy WebGL2, Web Audio, PWA z service workerem. Kopiujemy z `~/code/fala` i `~/code/roj` (nie importujemy): RNG, `math.ts`, plugin SW, `icons.mjs`, workflow, później renderer z bloomem i composite.
 - **Balans:** wszystkie liczby rozgrywki w `src/game/balance.ts` (`BAL`), w regułach żadnych zaszytych liczb. `#bal={...}` w URL nadpisuje.
 - **Symulator:** `npm run sim` gra utwory bez grafiki botem o `skill` 0–1 (refleks paletki, trafianie uderzeniem w czasie). Raport: odsetek zaliczeń, zbite klocki do końca utworu, utracone piłki, trafienia w rytm. Cele pierwszego podejścia:

@@ -1,6 +1,6 @@
 # Puls — notes for agents
 
-Browser game (phone portrait first; landscape and laptop show the board as a centred column): Breakout where every brick is a note and the song builds from how you play. Vite + TypeScript, raw WebGL2, no engine, no image/audio assets (everything procedural/synthesized). Design doc: `docs/PLAN.md` (Polish, the source of truth for milestones M0–M5). Deploy: GitHub Pages from `dist/` via `.github/workflows/pages.yml` (origin not set yet — the owner will provide it). Pattern projects: `~/code/fala`, `~/code/roj` — copy code from there, don't import it.
+Browser game (phone portrait first; landscape and laptop show the board as a centred column): Breakout where every brick is a note and the song builds from how you play. Vite + TypeScript, raw WebGL2, no engine, no image/audio assets (everything procedural/synthesized). Design doc: `docs/PLAN.md` (Polish, the source of truth for milestones M0–M5). Deploy: GitHub Pages from `dist/` via `.github/workflows/pages.yml`; repo `git@github.com:jakubkapusta/puls.git`, game at https://jakubkapusta.github.io/puls/. Pattern projects: `~/code/fala`, `~/code/roj` — copy code from there, don't import it.
 
 ## Status (read first)
 
