@@ -67,6 +67,13 @@ Dev helper: `window.__puls` — `game`, `demo`, `audio`, `renderer`, `BAL`, `aut
 - **UI**: menu → "Graj" opens the song list (album tabs, stars, best, locks, BPM · length · layers), "Utwór dnia" and "Jam" cards in the menu, end screen with animated stars, "Dalej" (next unlocked song), "Jeszcze raz", "Posłuchaj swojej wersji", "Utwory".
 - **Performance**: coarse-pointer devices with ≤ 4 cores start at render quality 0.8; quality drops after ~1.5 s under 45 fps and climbs back after ~15 s above 58 fps.
 
+## Samples: candidates to replace Lo-fi (2026-10-06)
+
+- Owner: "lo-fi doesn't convince me, it lacks character — give me samples of alternatives". The album **"Próbki"** (`lab: true` in `ALBUMS`; always open, outside progress, stars, the daily pick and `SONGS`) has one ~1-minute song per candidate, each with its own kit and theme: **Chiptune** "Pikselowy świt" (140 BPM: pulse waves via `createPeriodicWave`, chords as 32nd arpeggios, noise drums, coin bricks; fat-pixel post), **Techno** "Betonowa hala" (128: driven kick + rumble, metallic hats from detuned squares, 303-style acid bass, dub stabs into the echo; grey/red, kick strobe), **Funk / disco** "Kula disco" (112: slap bass, wah clavinet, brass stabs, string swells, vibraphone bricks; gold/purple, mirror-ball spots), **Drum & bass** "Nocny ekspres" (174: breakbeat with ghost snares, reese bass, wide pads, glassy plucks; teal night, speed streaks). In the song list each has a "Bot" button (a skill-0.92 bot plays, nothing is saved).
+- **Kits**: `Kit` = synth | lofi | chip | techno | funk | dnb. A kit overrides voices through `voice()` (a table of bound methods: kick, snare, hat, clap, bass, pad, arp, lead, brick, bells); anything missing falls back to the synthwave voice. Lo-fi and D&B walk `bass2` in 8ths.
+- **Themes** (`src/render/themes.ts`): per kit the background palette (`u_pal[5]`), look flags (`u_look`: city skyline + wet street, rain, banded sun, sun amount; `u_look2`: disco spots, speed streaks, grid amount, stars), brick row colours and post (`u_post`: warmth, grain, pixel size, kick strobe). A new album = a kit's voices + one theme entry.
+- After the owner picks: move that kit into a real album (3–5 songs like the synthwave ones), drop or keep Lo-fi as they say, remove the samples album.
+
 ## Balance
 
 `npm run sim` plays every song at skills 0.2 / 0.5 / 0.9 and prints pass / clear (clear time) / out of lives per cell; `--song id`, `--runs`, `--skill`, `--jam`; knobs without editing: `BAL='{"ball":{"speed":700}}' npm run sim`.

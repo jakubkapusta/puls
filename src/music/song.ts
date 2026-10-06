@@ -3,7 +3,7 @@
 
 export type LayerId = 'hat' | 'snare' | 'pad' | 'arp' | 'perc' | 'bass2' | 'bells';
 /** the sound and look of an album */
-export type Kit = 'synth' | 'lofi';
+export type Kit = 'synth' | 'lofi' | 'chip' | 'techno' | 'funk' | 'dnb';
 
 export type Chord = {
   /** semitones above the song root */

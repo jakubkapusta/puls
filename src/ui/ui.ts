@@ -19,7 +19,7 @@ export type UIHandlers = {
   calibSet: (ms: number) => void;
   calibDone: () => void;
   songs: () => void;
-  pick: (id: string) => void;
+  pick: (id: string, bot?: boolean) => void;
   album: (id: string) => void;
   daily: () => void;
   jam: () => void;
@@ -32,6 +32,8 @@ export type UIHandlers = {
 export type AlbumView = {
   id: string; title: string; sub: string; locked: boolean; lockNote: string;
   songs: { id: string; title: string; meta: string; stars: number; best: number; locked: boolean }[];
+  /** samples: no stars, a "Bot" button to just listen */
+  lab?: boolean;
 };
 
 export type EndInfo = {
@@ -348,12 +350,13 @@ export class UI {
       <button class="song${sg.locked ? ' locked' : ''}" data-id="${sg.id}" ${sg.locked ? 'disabled' : ''}>
         <span class="n">${i + 1}</span>
         <span class="t"><b>${sg.title}</b><small>${sg.meta}</small></span>
-        <span class="r">${sg.locked ? '<span class="lock">🔒</span>' : `<span class="stars">${stars(sg.stars)}</span><small>${sg.best ? sg.best.toLocaleString('pl-PL') : '—'}</small>`}</span>
+        <span class="r">${sg.locked ? '<span class="lock">🔒</span>' : a.lab ? '<span class="botbtn" data-bot="1">Bot</span>' : `<span class="stars">${stars(sg.stars)}</span><small>${sg.best ? sg.best.toLocaleString('pl-PL') : '—'}</small>`}</span>
       </button>`).join('');
     list.classList.toggle('dim', a.locked);
     list.querySelectorAll<HTMLButtonElement>('.song:not(.locked)').forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (!a.locked) this.h.pick(b.dataset.id!);
+      const bot = (e.target as HTMLElement).closest('[data-bot]');
+      if (!a.locked) this.h.pick(b.dataset.id!, !!bot);
     }));
   }
 

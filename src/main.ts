@@ -12,7 +12,7 @@ import { UI, type AlbumView, type EndInfo } from './ui/ui';
 import { applySpeed, applyTest, fullSel, testTag, type TestSel } from './game/tuning';
 import { hintSeen, loadMeta, logPlay, markHint, saveMeta, today } from './game/save';
 import { Bot } from './sim/bot';
-import { ALBUMS, JAM, SONGS, songById } from './music/songs';
+import { ALBUMS, JAM, KIT_NAMES, SONGS, songById } from './music/songs';
 import type { LayerId, Song } from './music/song';
 import type { Tempo } from './music/tempo';
 import type { Recording } from './audio/audio';
@@ -127,13 +127,17 @@ const ui = new UI(document.getElementById('ui')!, {
       demo = null;
     }
   },
-  pick: (id) => {
+  pick: (id, bot) => {
     const sg = songById(id);
     if (!sg) return;
     song = sg;
-    meta.lastSong = sg.id;
-    saveMeta(meta);
+    if (!ALBUMS.find((a) => a.lab && a.songs.includes(sg))) {
+      meta.lastSong = sg.id;
+      saveMeta(meta);
+    }
     start('song');
+    // "Bot": just listen — a good bot plays it
+    if (bot) auto = new Bot(0.92, 11);
   },
   daily: () => {
     const d = dailyPick(today());
@@ -176,11 +180,12 @@ const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60
 function showSongs() {
   mode = 'menu';
   const albums: AlbumView[] = ALBUMS.map((a, ai) => ({
-    id: a.id, title: a.title, sub: a.sub, locked: !albumUnlocked(meta, ai),
+    id: a.id, title: a.title, sub: a.sub, locked: !albumUnlocked(meta, ai), lab: a.lab,
     lockNote: `Zalicz „${ALBUMS[ai - 1]?.songs[2]?.title ?? ''}”, żeby otworzyć album`,
     songs: a.songs.map((sg, si) => {
       const r = songRec(meta, sg.id);
-      return { id: sg.id, title: sg.title, meta: `${sg.bpm} BPM · ${fmtTime(sg.length)} · ${sg.layers.length} warstw`, stars: r.stars, best: r.best, locked: !songUnlocked(meta, ai, si) };
+      const m = a.lab ? `${KIT_NAMES[sg.kit]} · ${sg.bpm} BPM · ${fmtTime(sg.length)}` : `${sg.bpm} BPM · ${fmtTime(sg.length)} · ${sg.layers.length} warstw`;
+      return { id: sg.id, title: sg.title, meta: m, stars: r.stars, best: r.best, locked: !songUnlocked(meta, ai, si) };
     }),
   }));
   ui.showSongs(albums, meta.lastAlbum, totalStars(meta));
@@ -451,7 +456,7 @@ function endLevel(g: Game) {
   const stars = runKind === 'jam' ? -1 : starsFor(g);
   let isBest = false;
   if (!auto) {
-    if (runKind === 'song') {
+    if (runKind === 'song' && SONGS.includes(song)) {
       const r = songRec(meta, song.id);
       isBest = score > r.best;
       r.plays++;
@@ -493,7 +498,7 @@ function endLevel(g: Game) {
       ['Idealne', String(st.perfect)],
       ['Najdłuższa seria', String(st.bestStreak)],
     ],
-    stars,
+    stars: SONGS.includes(song) || runKind === 'daily' ? stars : -1,
     canNext: runKind === 'song' && g.passed && !!nextSong(meta, song),
     canListen: false,
   };
@@ -671,7 +676,7 @@ function frame(nowMs: number) {
 
   const kitNow = mode === 'replay' && replayRec ? replayRec.song.kit : (shown?.song.kit ?? song.kit);
   const beat = mode === 'replay' && replayRec ? replayBeat(replayRec, dt) : beatOf(shown, dt, mode === 'play');
-  renderer.render(shown, beat, sel.ring === 'on', kitNow === 'lofi');
+  renderer.render(shown, beat, sel.ring === 'on', kitNow);
 
   // quality: drop the render scale if frames are slow for a while
   if (fps < 45) slowFrames++;

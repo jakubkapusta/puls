@@ -13,7 +13,7 @@ const add9 = (root: number): Chord => ({ root, tones: [0, 4, 7, 14] });
 const maj = (root: number): Chord => ({ root, tones: [0, 4, 7, 12] });
 const sus2 = (root: number): Chord => ({ root, tones: [0, 2, 7, 12] });
 
-export type Album = { id: string; title: string; sub: string; kit: Kit; songs: Song[] };
+export type Album = { id: string; title: string; sub: string; kit: Kit; songs: Song[]; /** always open, outside progress */ lab?: boolean };
 
 // ---------------------------------------------------------------- synthwave
 const SYNTH_COMMON = { album: 'synthwave', kit: 'synth' as const, scale: MINOR_PENTA, intro: 2, rowBase: 3, rowStep: 1 };
@@ -373,6 +373,166 @@ const TRAM: Song = makeSong({
   leadBase: 10,
 });
 
+// ---------------------------------------------------------------- samples: candidates for the second album
+// Short songs (about a minute) to judge a style by ear; the owner picks one to replace Lo-fi.
+const LAB_COMMON = { album: 'lab', scale: MINOR_PENTA, intro: 1, rowBase: 4, rowStep: 1, hardHp: 5 };
+
+const CHIP: Song = makeSong({
+  ...LAB_COMMON,
+  kit: 'chip',
+  id: 'pikselowy-swit',
+  title: 'Pikselowy świt',
+  bpm: 140,
+  root: 45, // A — Am, F, C, G(sus2)
+  chords: [m7(0), maj(-4), maj(3), sus2(-2)],
+  bars: 36,
+  rows: [
+    '.3.55.3.',
+    '24a66a42',
+    '.4.33.4.',
+    '3.5bb5.3',
+    '.2.44.2.',
+    '1.3..3.1',
+    '..2..2..',
+  ],
+  specials: [
+    '.D....D.',
+    'A......A',
+    '.R....E.',
+    '........',
+    '.P....M.',
+    '........',
+    '........',
+  ],
+  layers: ['hat', 'pad', 'snare', 'arp', 'bass2', 'bells', 'perc'],
+  kick: 'x.......x.x.....',
+  snare: '....x.......x...',
+  hat: 'x.x.x.x.x.x.x.x.',
+  perc: 'xxxxxxxxxxxxxxxx',
+  bass: 'x.o.x.o.x.o.x.o.',
+  arp: '0123210301232103',
+  bells: '..2...1...3...0.',
+  lead: ['5-4-3-4-5---6---', '5-4-3-2-1---0---', '2-3-4-5-6-7-6---', '5-------4-3-2---'],
+  leadBase: 10,
+});
+
+const TECHNO: Song = makeSong({
+  ...LAB_COMMON,
+  kit: 'techno',
+  id: 'betonowa-hala',
+  title: 'Betonowa hala',
+  bpm: 128,
+  root: 41, // F — Fm7 held, then D♭maj7, E♭sus2: mostly one chord, the way techno does it
+  chords: [m7(0), m7(0), maj7(-4), sus2(-2)],
+  bars: 36,
+  rows: [
+    '..3443..',
+    '.2a55a2.',
+    '3.4..4.3',
+    '.3b44b3.',
+    '2.3..3.2',
+    '.1.22.1.',
+    '..1..1..',
+  ],
+  specials: [
+    '..D..D..',
+    '......F.',
+    'A......R',
+    '........',
+    'P......E',
+    '...m....',
+    '........',
+  ],
+  layers: ['hat', 'bass2', 'snare', 'perc', 'pad', 'arp', 'bells'],
+  kick: 'x...x...x...x...',
+  snare: '....o.......o...',
+  hat: '..x...x...x...x.',
+  perc: 'x.xox.xox.xox.xo',
+  bass: 'x.xxo.x.xx.xo.x.',
+  arp: '0..2..1..3..0..2',
+  bells: '......0.........',
+  lead: ['0---2---3---2---', '0---2---4---3---', '0---2---3---5---', '4---3---2---0---'],
+  leadBase: 10,
+});
+
+const FUNK: Song = makeSong({
+  ...LAB_COMMON,
+  kit: 'funk',
+  id: 'kula-disco',
+  title: 'Kula disco',
+  bpm: 112,
+  root: 40, // E — Em9, A7sus4, Cmaj7, Dsus2
+  chords: [m9(0), { root: 5, tones: [0, 5, 7, 10] }, maj7(-4), sus2(-2)],
+  bars: 36,
+  rows: [
+    '.4.55.4.',
+    '3a.66.a3',
+    '.45..54.',
+    '2.3bb3.2',
+    '.3.44.3.',
+    '12.33.21',
+    '..1..1..',
+  ],
+  specials: [
+    '.D....D.',
+    'A......A',
+    '.R....E.',
+    '........',
+    '.F....P.',
+    '...M....',
+    '........',
+  ],
+  layers: ['hat', 'snare', 'bass2', 'arp', 'pad', 'perc', 'bells'],
+  kick: 'x...x...x...x...',
+  snare: '....x.......x...',
+  hat: '..x...x...x...x.',
+  perc: 'xxoxxxoxxxoxxxox',
+  bass: 'x..xo.x.x..xo.x.',
+  arp: '..0.2..1..0.3..2',
+  bells: '0...............',
+  lead: ['3-4-5---4-3-2---', '3-------2-1-----', '4-5-6---5-4-3---', '5---4---3---2---'],
+  leadBase: 10,
+});
+
+const DNB: Song = makeSong({
+  ...LAB_COMMON,
+  kit: 'dnb',
+  id: 'nocny-ekspres',
+  title: 'Nocny ekspres',
+  bpm: 174,
+  root: 38, // D — Dm9, B♭maj7, Fmaj7, Csus2
+  chords: [m9(0), maj7(-4), maj7(3), sus2(-2)],
+  bars: 48,
+  rows: [
+    '..4554..',
+    '.3a..a3.',
+    '2.4664.2',
+    '.35bb53.',
+    '3.2..2.3',
+    '.2.33.2.',
+    '1..11..1',
+  ],
+  specials: [
+    '..D..D..',
+    '.A....A.',
+    'R......E',
+    '........',
+    'F......P',
+    '...M....',
+    '........',
+  ],
+  layers: ['hat', 'snare', 'pad', 'bass2', 'perc', 'arp', 'bells'],
+  kick: 'x.........x.....',
+  snare: '....x.......x...',
+  hat: 'x.x.x.x.x.x.x.x.',
+  perc: '..o....o.o....o.',
+  bass: 'x.......x.....x.',
+  arp: '0...2...1...3...',
+  bells: '......0.......1.',
+  lead: ['3-------2---1---', '0-------1---2---', '3-------4---5---', '4-------3-------'],
+  leadBase: 10,
+});
+
 // ---------------------------------------------------------------- jam (endless, rows generated)
 export const JAM: Song = makeSong({
   ...SYNTH_COMMON,
@@ -398,10 +558,16 @@ export const JAM: Song = makeSong({
 export const ALBUMS: Album[] = [
   { id: 'synthwave', title: 'Synthwave', sub: 'neonowa noc · 96–112 BPM', kit: 'synth', songs: [NIGHT_DRIVE, NEON_SHORE, CASSETTE, LASER_HORIZON, LAST_SUNSET] },
   { id: 'lofi', title: 'Lo-fi', sub: 'deszczowe miasto · 76–84 BPM', kit: 'lofi', songs: [RAIN, COFFEE, TRAM] },
+  { id: 'lab', title: 'Próbki', sub: 'kandydaci na drugi album · posłuchaj i wybierz', kit: 'synth', songs: [CHIP, TECHNO, FUNK, DNB], lab: true },
 ];
 
-export const SONGS: Song[] = ALBUMS.flatMap((a) => a.songs);
+/** genre names of the samples */
+export const KIT_NAMES: Record<string, string> = { chip: 'Chiptune', techno: 'Techno', funk: 'Funk / disco', dnb: 'Drum & bass', lofi: 'Lo-fi', synth: 'Synthwave' };
+
+/** the songs of the game proper (the samples stay out of progress, stars and the daily pick) */
+export const SONGS: Song[] = ALBUMS.filter((a) => !a.lab).flatMap((a) => a.songs);
+const ALL: Song[] = ALBUMS.flatMap((a) => a.songs);
 
 export function songById(id: string): Song | null {
-  return SONGS.find((s) => s.id === id) ?? (id === JAM.id ? JAM : null);
+  return ALL.find((s) => s.id === id) ?? (id === JAM.id ? JAM : null);
 }

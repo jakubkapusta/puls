@@ -7,7 +7,8 @@ import { Program, Target, DynBuffer, type GL } from '../gl/gl';
 import * as S from './shaders';
 import { BAL, FIELD_H, FIELD_W } from '../game/balance';
 import type { Game, GameEvent, PowerId, SpecialId } from '../game/game';
-import type { LayerId } from '../music/song';
+import type { Kit, LayerId } from '../music/song';
+import { THEMES, type Theme } from './themes';
 import { clamp, damp, lerp } from '../core/math';
 
 type RGB = [number, number, number];
@@ -39,13 +40,11 @@ const HEAT: RGB[] = [
   [2.6, 1.2, 1.9],
 ];
 
-/** the palette of the current album: 0 synthwave, 1 lo-fi */
-let paletteLofi = false;
+/** the theme of the current album (brick colours read it) */
+let theme: Theme = THEMES.synth;
 export function rowColor(k: number): RGB {
-  // synthwave: bottom rows cyan, through violet, top rows hot pink; lo-fi: teal, amber, rose
-  const a: RGB = paletteLofi ? [0.3, 0.8, 0.8] : [0.15, 0.85, 1.25];
-  const b: RGB = paletteLofi ? [1.25, 0.8, 0.4] : [0.75, 0.35, 1.35];
-  const c: RGB = paletteLofi ? [1.2, 0.42, 0.5] : [1.4, 0.25, 0.75];
+  // bottom rows → top rows through the album's three colours
+  const [a, b, c] = theme.rows;
   const m = (x: RGB, y: RGB, t: number): RGB => [lerp(x[0], y[0], t), lerp(x[1], y[1], t), lerp(x[2], y[2], t)];
   return k < 0.5 ? m(a, b, k * 2) : m(b, c, (k - 0.5) * 2);
 }
@@ -335,13 +334,12 @@ export class Renderer {
   }
 
   // ------------------------------------------------------------ frame
-  /** the album's look (0 synthwave, 1 lo-fi), eased between songs */
-  private theme = 0;
+  private strobe = 0;
   /** the replay has no game: it tells how many layers play */
   layersOverride: { n: number; ids: LayerId[] } | null = null;
 
-  render(g: Game | null, beat: Beat, showLanding: boolean, lofi = false) {
-    paletteLofi = lofi;
+  render(g: Game | null, beat: Beat, showLanding: boolean, kit: Kit = 'synth') {
+    theme = THEMES[kit] ?? THEMES.synth;
     const gl = this.gl;
     const now = performance.now() / 1000;
     const rdt = clamp(now - this.lastT, 0, 0.1);
@@ -371,7 +369,8 @@ export class Renderer {
       .f4('u_layA', this.lay[0], this.lay[1], this.lay[2], this.lay[3]).f2('u_layB', this.lay[4], this.lay[5])
       .tex('u_spec', 0, this.specTex)
       .f4('u_field', this.x0, this.y0, this.x0 + FIELD_W * this.s, this.y0 + FIELD_H * this.s).f1('u_hz', hz).f1('u_detail', this.quality)
-      .f1('u_theme', lofi ? 1 : 0);
+      .f4('u_look', ...theme.look).f4('u_look2', ...theme.look2);
+    theme.pal.forEach((c, i) => this.pBg.f3(`u_pal[${i}]`, c[0], c[1], c[2]));
     this.fullscreen();
 
     // shapes
@@ -391,7 +390,8 @@ export class Renderer {
       gl.disable(gl.BLEND);
     }
 
-    this.theme += ((lofi ? 1 : 0) - this.theme) * damp(3, rdt);
+    // the strobe hits on the kick once the track is up (techno)
+    this.strobe = theme.post[3] * Math.pow(beat.kick, 6) * Math.max(0, beat.energy - 0.3) / 0.7;
     this.flash *= Math.exp(-rdt * 12);
     this.dim *= Math.exp(-rdt * 0.9);
     this.tint *= Math.exp(-rdt * 3);
@@ -728,7 +728,8 @@ export class Renderer {
     const p = this.pComp.use().tex('u_scene', 0, this.scene.tex).tex('u_bloom', 1, this.bloom[0].tex)
       .f2('u_res', this.W, this.H).f1('u_time', this.time).f1('u_bloomAmt', this.bloomAmt).f1('u_ca', this.ca * 0.012)
       .f1('u_flash', this.flash).f3('u_tint', this.tint * 0.12, 0, this.tint * 0.02)
-      .f1('u_dim', this.dim * 0.55).f1('u_theme', this.theme).f1('u_zoom', zoom).f2('u_shake', (this.r() - 0.5) * sh, (this.r() - 0.5) * sh).f1('u_glitch', this.glitch);
+      .f1('u_dim', this.dim * 0.55)
+      .f4('u_post', theme.post[0], theme.post[1], theme.post[2] * this.W / (this.canvas.clientWidth || window.innerWidth), this.strobe).f1('u_zoom', zoom).f2('u_shake', (this.r() - 0.5) * sh, (this.r() - 0.5) * sh).f1('u_glitch', this.glitch);
     this.shocks = this.shocks.filter((s) => this.time - s.t0 < s.dur);
     for (let i = 0; i < 4; i++) {
       const s = this.shocks[i];

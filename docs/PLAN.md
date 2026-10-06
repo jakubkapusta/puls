@@ -15,6 +15,7 @@
 | Utrata piłki | **Życia + muzyka cichnie.** Kilka żyć na utwór. Spadek piłki: mnożnik się zeruje, jedna warstwa muzyki gaśnie, piłka wraca na paletkę. Utrata wszystkich żyć kończy poziom z wynikiem, ale bez zaliczenia. |
 | Trafienie w rytm | **Piłka w rytmie + uderzenie.** Gra delikatnie dopasowuje prędkość piłki, żeby spadała na paletkę na bit, więc całość „tańczy” z muzyką. Gracz może dodatkowo **uderzyć** (szybki ruch palca w górę, spacja, klik). Uderzenie w momencie kontaktu = trafienie w rytm: mnożnik, piłka się rozgrzewa. Samo złapanie też odbija piłkę, ale bez bonusu. |
 | Zakres przed testem | **M0–M1, potem STOP.** Czucie odbijania i rytmu z prostą grafiką i jednym utworem. Efekty wow i 5 utworów dopiero po teście właściciela na telefonie. |
+| Lo-fi (2026-10-06) | Właściciel: Lo-fi nie przekonuje, brakuje mu charakteru. Dostał album „Próbki” z czterema kandydatami (Chiptune, Techno, Funk/disco, Drum & bass), wybierze zastępstwo. |
 | M4 i M5 (2026-10-06) | Właściciel: „jedź z M4 i M5 od razu, będę testował później”. Łatwiej ocenić feel na kilku utworach. |
 | Po obejrzeniu M2 (2026-10-06) | Piłka i trafienie „idealnie” świeciły za mocno (piłka ginęła w kuli światła): przygaszone. Podłoże nie może falować. Dalej M3. |
 | Po teście M1 (2026-10-06) | Uderzenie ruchem palca w górę zostaje (wygodniejsze niż stuknięcie). Pierścień lądowania za bardzo ułatwia: domyślnie wyłączony. Prędkość piłki to wybór gracza w menu: średnia albo szybka, szybka daje +25% punktów. M1 odebrane, dalej M2. |

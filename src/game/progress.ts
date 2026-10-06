@@ -21,7 +21,7 @@ export const rec = (m: Meta, id: string): SongRec => m.songs[id] ?? { best: 0, p
 
 /** the Lo-fi album opens when the third synthwave song is passed */
 export function albumUnlocked(m: Meta, albumIdx: number) {
-  if (albumIdx === 0) return true;
+  if (albumIdx === 0 || ALBUMS[albumIdx].lab) return true;
   const prev = ALBUMS[albumIdx - 1];
   return rec(m, prev.songs[Math.min(2, prev.songs.length - 1)].id).passed;
 }
@@ -29,15 +29,16 @@ export function albumUnlocked(m: Meta, albumIdx: number) {
 /** songs open in order inside an album */
 export function songUnlocked(m: Meta, albumIdx: number, songIdx: number) {
   if (!albumUnlocked(m, albumIdx)) return false;
-  return songIdx === 0 || rec(m, ALBUMS[albumIdx].songs[songIdx - 1].id).passed;
+  return songIdx === 0 || !!ALBUMS[albumIdx].lab || rec(m, ALBUMS[albumIdx].songs[songIdx - 1].id).passed;
 }
 
 export function nextSong(m: Meta, song: Song): Song | null {
   for (let a = 0; a < ALBUMS.length; a++) {
     const i = ALBUMS[a].songs.indexOf(song);
     if (i < 0) continue;
+    if (ALBUMS[a].lab) return null;
     if (i + 1 < ALBUMS[a].songs.length) return songUnlocked(m, a, i + 1) ? ALBUMS[a].songs[i + 1] : null;
-    return a + 1 < ALBUMS.length && albumUnlocked(m, a + 1) ? ALBUMS[a + 1].songs[0] : null;
+    return a + 1 < ALBUMS.length && !ALBUMS[a + 1].lab && albumUnlocked(m, a + 1) ? ALBUMS[a + 1].songs[0] : null;
   }
   return null;
 }

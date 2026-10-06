@@ -53,7 +53,10 @@ uniform sampler2D u_spec;  // 32 spectrum bins (R8)
 uniform vec4 u_field;      // playfield rect in pixels: x0, y0, x1, y1
 uniform float u_hz;        // horizon height (0..1 of the screen)
 uniform float u_detail;    // quality 0.5..1
-uniform float u_theme;     // 0 synthwave, 1 lo-fi (rainy city at dusk)
+// the album's look (see render/themes.ts)
+uniform vec3 u_pal[5];     // pink, violet, cyan, deep, sun
+uniform vec4 u_look;       // city skyline, rain, sun bands, sun amount
+uniform vec4 u_look2;      // disco spots, speed streaks, grid amount, stars
 out vec4 o;
 
 float ridge(float x, float s, float a){
@@ -71,16 +74,13 @@ void main(){
   float sunY = hz + .13;
   vec3 sunHot = mix(vec3(1., .72, .18), vec3(1., .9, .6), u_groove * .5);
 
-  bool lofi = u_theme > .5;
-  if (lofi) {
-    // lo-fi: a warmer, softer palette
-    pink = vec3(1., .42, .3);
-    violet = vec3(.22, .12, .3);
-    cyan = vec3(.35, .75, .8);
-    deep = vec3(.01, .014, .025);
-    sunY = hz + .1;
-    sunHot = vec3(1., .78, .5);
-  }
+  pink = u_pal[0];
+  violet = u_pal[1];
+  cyan = u_pal[2];
+  deep = u_pal[3];
+  sunHot = mix(u_pal[4], vec3(1., .9, .6), u_groove * .5);
+  bool city = u_look.x > .5;
+  if (city) sunY = hz + .1;
 
   if (p.y > hz) {
     float h = (p.y - hz) / (1. - hz);
@@ -93,7 +93,7 @@ void main(){
     vec2 sp = floor(fc / 3.);
     float st = hash12(sp);
     float tw = .5 + .5 * sin(u_time * 3. + st * 40.);
-    float dens = lofi ? 1.1 : mix(.9975, .993, u_layA.x);
+    float dens = u_look2.w < .5 ? 1.1 : mix(.9975, .993, u_layA.x);
     c += vec3(.8, .85, 1.) * step(dens, st) * (.25 + 1.1 * u_hat * tw * u_layA.x) * smoothstep(.12, .45, h);
 
     // pad: aurora ribbons drifting across the sky
@@ -131,10 +131,28 @@ void main(){
     float d = length(p - sc);
     float k = clamp((p.y - (sc.y - R)) / (2. * R), 0., 1.);
     vec3 sun = mix(vec3(1., .08, .35), sunHot, k) * (.5 + u_energy * .3 + u_kick * .3 + u_groove * .2);
-    float bands = lofi ? 1. : step(.5, fract((p.y - hz) * 46. - u_time * .4)) + step(.55, k);
-    float inside = smoothstep(lofi ? .02 : .003, lofi ? -.02 : -.003, d - R) * clamp(bands, 0., 1.) * (lofi ? .55 : 1.);
+    float soft = u_look.z > .5 ? .003 : .02;
+    float bands = u_look.z > .5 ? step(.5, fract((p.y - hz) * 46. - u_time * .4)) + step(.55, k) : 1.;
+    float inside = smoothstep(soft, -soft, d - R) * clamp(bands, 0., 1.) * u_look.w;
     c = mix(c, sun, inside);
-    c += vec3(1., .2, .5) * exp(-max(d - R, 0.) * 9.) * (.1 + .15 * u_kick + .12 * u_energy);
+    c += pink * exp(-max(d - R, 0.) * 9.) * (.1 + .15 * u_kick + .12 * u_energy) * u_look.w;
+    // disco: light spots from a mirror ball sweeping the sky
+    if (u_look2.x > .5) {
+      float ang = u_time * .25;
+      vec2 sp2 = mat2(cos(ang), sin(ang), -sin(ang), cos(ang)) * (p - vec2(0., 1.05)) * 9.;
+      vec2 cell = floor(sp2), fr2 = fract(sp2) - .5;
+      float hh = hash12(cell);
+      float dot2 = smoothstep(.16, .05, length(fr2 + (vec2(hash12(cell + 3.), hash12(cell + 7.)) - .5) * .5)) * step(.55, hh);
+      c += mix(vec3(1., .8, .4), vec3(.8, .5, 1.), hash12(cell + 11.)) * dot2 * (.12 + .35 * u_kick) * (.5 + .5 * u_energy);
+    }
+    // drum & bass: speed streaks rushing across the sky
+    if (u_look2.y > .5) {
+      float ly = floor(p.y * 220.);
+      float rs = hash12(vec2(ly, 3.));
+      float xx = fract(p.x * .35 + u_time * (1.2 + rs * 2.5) + rs * 9.);
+      float streak = step(.93, rs) * smoothstep(0., .25, xx) * smoothstep(.45, .25, xx) * smoothstep(.1, .5, h);
+      c += cyan * streak * (.25 + .4 * u_hat);
+    }
 
     // perc: a spectrum skyline on the horizon, mirrored around the centre
     if (u_layB.y > .01) {
@@ -147,7 +165,7 @@ void main(){
       c = mix(c, ec * (.35 + .7 * v), inBar * .8);
     }
 
-    if (lofi) {
+    if (city) {
       // a city skyline with lit windows, flickering a little with the hats
       float bw = .045;
       float bx = floor(p.x / bw);
@@ -186,7 +204,8 @@ void main(){
     float line = max(lx * smoothstep(.6, .1, fw.x), ly * fade);
     vec3 lc = mix(cyan * 1.2, vec3(1., .2, .8), clamp(u_groove * .8 + u_bass * .25, 0., 1.));
     c = mix(vec3(.01, .002, .03), violet * .05, smoothstep(0., .3, dy));
-    if (lofi) {
+    line *= u_look2.z;
+    if (city) {
       // wet asphalt: faint lines, the windows' light smeared into long reflections
       c = vec3(.008, .009, .014);
       line *= .25;
@@ -195,12 +214,17 @@ void main(){
       c += vec3(1., .65, .35) * refl * exp(-dy * 9.) * .07;
     }
     c += lc * line * (.35 + .9 * u_kick + .6 * u_bass + u_layB.x * .7 * u_bass) * smoothstep(0., .04, dy);
+    if (u_look2.x > .5) {
+      vec2 fp = vec2(p.x / (dy + .05), 1. / (dy + .05)) * .9 + vec2(sin(u_time * .3), u_time * .2);
+      vec2 cell = floor(fp), fr2 = fract(fp) - .5;
+      c += mix(vec3(1., .8, .4), vec3(.8, .5, 1.), hash12(cell + 2.)) * smoothstep(.2, .05, length(fr2)) * step(.6, hash12(cell)) * (.05 + .15 * u_kick) * smoothstep(0., .1, dy);
+    }
     // the sun's reflection on the floor
-    c += sunHot * exp(-abs(p.x) * 7.) * exp(-dy * 7.) * (.12 + .2 * u_kick) * (.6 + u_energy);
+    c += sunHot * exp(-abs(p.x) * 7.) * exp(-dy * 7.) * (.12 + .2 * u_kick) * (.6 + u_energy) * u_look.w;
     // the horizon glows
     c += pink * exp(-dy * 40.) * (.5 + .4 * u_kick);
   }
-  if (lofi) {
+  if (u_look.y > .5) {
     // rain, slanted, over everything
     vec2 rp = vec2(p.x * 70. + p.y * 9., p.y * 2.2 + u_time * 2.6);
     float col = floor(rp.x);
@@ -387,11 +411,14 @@ uniform float u_zoom;      // camera breathing with the beat (1 = still)
 uniform vec2 u_shake;      // px
 uniform float u_glitch;    // 0..1 slices shifted sideways (lost ball)
 uniform float u_dim;       // 0..1 the Filtr brick: the picture sinks with the sound
-uniform float u_theme;     // lo-fi: warmer, grainier
+uniform vec4 u_post;       // warmth, extra grain, pixel size (px, 0 = off), strobe flash
 out vec4 o;
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14), 0., 1.); }
 void main(){
-  vec2 uv = (v_uv - .5) / u_zoom + .5 + u_shake / u_res;
+  vec2 uv0 = v_uv;
+  // chiptune: the whole picture in fat pixels
+  if (u_post.z > 1.) uv0 = (floor(v_uv * u_res / u_post.z) + .5) * u_post.z / u_res;
+  vec2 uv = (uv0 - .5) / u_zoom + .5 + u_shake / u_res;
   if (u_glitch > .01) {
     float row = floor(v_uv.y * 38.);
     float n = hash12(vec2(row, floor(u_time * 24.)));
@@ -416,14 +443,14 @@ void main(){
   vec3 c = vec3(texture(u_scene, uv + cd).r, texture(u_scene, uv).g, texture(u_scene, uv - cd).b);
   c = safe(c) + safe(texture(u_bloom, uv).rgb) * u_bloomAmt;
   c *= 1. - u_dim;
-  c += u_tint + vec3(u_flash);
+  c += u_tint + vec3(u_flash + u_post.w);
   c = aces(c);
   vec2 q = v_uv - .5;
   c *= 1. - dot(q, q) * .9;
   // faint scanlines
   c *= .96 + .04 * sin(gl_FragCoord.y * 1.7);
   c = pow(max(c, 0.), vec3(1. / 2.2));
-  c = mix(c, c * vec3(1.06, 1., .9) + vec3(.012, .008, 0.), u_theme);
-  c += (hash12(gl_FragCoord.xy + fract(u_time * 7.3) * 311.) - .5) * mix(.03, .065, u_theme);
+  c = mix(c, c * vec3(1.06, 1., .9) + vec3(.012, .008, 0.), u_post.x);
+  c += (hash12(gl_FragCoord.xy + fract(u_time * 7.3) * 311.) - .5) * (.03 + u_post.y);
   o = vec4(c, 1.);
 }`;

@@ -14,6 +14,19 @@ import type { GameEvent } from '../game/game';
 import { BAL } from '../game/balance';
 import type { Tempo } from '../music/tempo';
 
+type Voices = {
+  kick(t: number, v: number): void;
+  snare(t: number, v: number): void;
+  hat(t: number, v: number, open: boolean): void;
+  clap(t: number, v: number): void;
+  bass(t: number, m: number, dur: number, v: number): void;
+  pad(t: number, ms: number[], dur: number): void;
+  arp(t: number, m: number): void;
+  lead(t: number, m: number, dur: number): void;
+  brick(t: number, m: number, heat: number, pierce: boolean, vol: number): void;
+  bells(t: number, m: number): void;
+};
+
 /** what the sequencer reads from the game (a replay fakes it from a recording) */
 export type SeqState = { layers: number; groove: boolean; dropStep: number; tempo: Tempo; fx: { laser: number } };
 
@@ -426,8 +439,8 @@ export class Audio {
       if (drop) this.sub(T, croot - 12, beat * 0.9);
     }
     // bass (always); the bass2 layer drives it in 16ths
-    // (lo-fi walks in 8ths instead: its round bass would blur in 16ths)
-    const drive = on.has('bass2') && (this.kit !== 'lofi' || s % 2 === 0);
+    // (lo-fi and d&b walk in 8ths instead: their long basses would blur in 16ths)
+    const drive = on.has('bass2') && ((this.kit !== 'lofi' && this.kit !== 'dnb') || s % 2 === 0);
     const bch = drive ? (pat(song.bass) === '.' ? (this.kit === 'lofi' && s % 4 === 2 ? '5' : 'x') : pat(song.bass)) : pat(song.bass);
     if (bch !== '.') {
       const m = croot + (bch === 'o' ? 12 : bch === '5' ? 7 : 0);
@@ -458,7 +471,10 @@ export class Audio {
       const c = pat(song.bells);
       if (c !== '.') {
         const idx = parseInt(c, 10), n = chord.tones.length;
-        this.bell(T, croot + 36 + chord.tones[idx % n] + 12 * Math.floor(idx / n), this.kit === 'lofi' ? 0.035 : 0.045);
+        const bm = croot + 36 + chord.tones[idx % n] + 12 * Math.floor(idx / n);
+        const ov = this.voice().bells;
+        if (ov) ov(T, bm);
+        else this.bell(T, bm, this.kit === 'lofi' ? 0.035 : 0.045);
       }
     }
     if (on.has('arp')) {
@@ -644,7 +660,8 @@ export class Audio {
   }
 
   private kick(t: number, v: number) {
-    if (this.kit === 'lofi') return this.kickL(t, v);
+    const ov = this.voice().kick;
+    if (ov) return ov(t, v);
     const g = this.gain(this.drums);
     this.env(g.gain, t, v, 0.002, 0.42);
     const o = this.osc('sine', 165, t, 0.45, g);
@@ -655,7 +672,8 @@ export class Audio {
   }
 
   private snare(t: number, v: number) {
-    if (this.kit === 'lofi') return this.snareL(t, v);
+    const ov = this.voice().snare;
+    if (ov) return ov(t, v);
     const g = this.gain(this.drums);
     this.env(g.gain, t, 0.42 * v, 0.002, 0.2);
     const send = this.gain(this.verb, 0.9 * v);
@@ -669,14 +687,16 @@ export class Audio {
   }
 
   private hat(t: number, v: number, open: boolean) {
-    if (this.kit === 'lofi') return this.hatL(t, v, open);
+    const ov = this.voice().hat;
+    if (ov) return ov(t, v, open);
     const g = this.gain(this.drums);
     this.env(g.gain, t, 0.16 * v, 0.001, open ? 0.2 : 0.04);
     this.noiseSrc(t, open ? 0.25 : 0.06, this.filter('highpass', open ? 7500 : 9000, 0.6, g));
   }
 
   private clap(t: number, v: number) {
-    if (this.kit === 'lofi') return this.clapL(t, v);
+    const ov = this.voice().clap;
+    if (ov) return ov(t, v);
     const g = this.gain(this.drums);
     const p = g.gain;
     p.setValueAtTime(0.0001, t);
@@ -693,7 +713,8 @@ export class Audio {
   }
 
   private bass(t: number, m: number, dur: number, v: number) {
-    if (this.kit === 'lofi') return this.bassL(t, m, dur, v);
+    const ov = this.voice().bass;
+    if (ov) return ov(t, m, dur, v);
     const g = this.gain(this.music);
     const p = g.gain;
     p.setValueAtTime(0.0001, t);
@@ -709,7 +730,8 @@ export class Audio {
   }
 
   private pad(t: number, ms: number[], dur: number) {
-    if (this.kit === 'lofi') return this.padL(t, ms, dur);
+    const ov = this.voice().pad;
+    if (ov) return ov(t, ms, dur);
     const g = this.gain(this.music);
     const p = g.gain;
     p.setValueAtTime(0.0001, t);
@@ -726,7 +748,8 @@ export class Audio {
   }
 
   private arp(t: number, m: number) {
-    if (this.kit === 'lofi') return this.arpL(t, m);
+    const ov = this.voice().arp;
+    if (ov) return ov(t, m);
     const g = this.gain(this.music);
     this.env(g.gain, t, 0.07, 0.003, 0.16);
     g.connect(this.gain(this.delay, 0.6));
@@ -737,7 +760,8 @@ export class Audio {
   }
 
   private lead(t: number, m: number, dur: number) {
-    if (this.kit === 'lofi') return this.leadL(t, m, dur);
+    const ov = this.voice().lead;
+    if (ov) return ov(t, m, dur);
     const g = this.gain(this.music);
     const p = g.gain;
     p.setValueAtTime(0.0001, t);
@@ -765,7 +789,8 @@ export class Audio {
 
   /** a brick: a plucked note, brighter and fuller as the ball heats up */
   private brick(t: number, m: number, heat: number, pierce: boolean, vol = 1) {
-    if (this.kit === 'lofi') return this.brickL(t, m, heat, pierce, vol);
+    const ov = this.voice().brick;
+    if (ov) return ov(t, m, heat, pierce, vol);
     const g = this.gain(this.notes);
     this.env(g.gain, t, 0.2 * vol, 0.003, 0.55 + heat * 0.05);
     g.connect(this.gain(this.delay, 0.45));
@@ -939,6 +964,23 @@ export class Audio {
     this.noiseSrc(t, 1.9, this.filter('highpass', 5000, 0.4, g));
   }
 
+  // ------------------------------------------------------------ kits
+  // Every album has a kit: the synthwave voices above are the default, a kit overrides some.
+  private kits: Partial<Record<Kit, Partial<Voices>>> | null = null;
+  private voice(): Partial<Voices> {
+    if (!this.kits) {
+      const b = <F extends (...a: never[]) => void>(f: F) => f.bind(this) as F;
+      this.kits = {
+        lofi: { kick: b(this.kickL), snare: b(this.snareL), hat: b(this.hatL), clap: b(this.clapL), bass: b(this.bassL), pad: b(this.padL), arp: b(this.arpL), lead: b(this.leadL), brick: b(this.brickL) },
+        chip: { kick: b(this.kickC), snare: b(this.snareC), hat: b(this.hatC), clap: b(this.clapC), bass: b(this.bassC), pad: b(this.padC), arp: b(this.arpC), lead: b(this.leadC), brick: b(this.brickC), bells: b(this.bellsC) },
+        techno: { kick: b(this.kickT), snare: b(this.snareT), hat: b(this.hatT), clap: b(this.clapT), bass: b(this.bassT), pad: b(this.padT), arp: b(this.arpT), lead: b(this.leadT), brick: b(this.brickT) },
+        funk: { kick: b(this.kickF), snare: b(this.snareF), hat: b(this.hatF), bass: b(this.bassF), pad: b(this.padF), arp: b(this.arpF), lead: b(this.leadF), brick: b(this.brickF), bells: b(this.bellsF) },
+        dnb: { kick: b(this.kickD), snare: b(this.snareD), hat: b(this.hatD), clap: b(this.clapD), bass: b(this.bassD), pad: b(this.padD), arp: b(this.arpD), lead: b(this.leadD), brick: b(this.brickD) },
+      };
+    }
+    return this.kits[this.kit] ?? {};
+  }
+
   // ------------------------------------------------------------ lo-fi kit
   // Warm and soft: a round kick, a dusty snare, dull hats and a shaker, a sine bass, a Rhodes-like
   // electric piano with tremolo, muted keys, a breathy flute lead; everything a bit darker.
@@ -1064,6 +1106,416 @@ export class Audio {
     const g = this.gain(this.master);
     this.env(g.gain, t, 0.05 + Math.random() * 0.05, 0.0005, 0.006);
     this.noiseSrc(t, 0.01, this.filter('highpass', 1500, 0.5, g));
+  }
+
+  // ------------------------------------------------------------ chiptune kit
+  // Pulse waves of a few duty cycles, a noise channel for drums, chords as fast arpeggios (the
+  // console couldn't play chords), coin-like bricks with a pitch flick.
+  private pulses: Map<number, PeriodicWave> = new Map();
+  private pulseWave(duty: number) {
+    let w = this.pulses.get(duty);
+    if (!w) {
+      const N = 32;
+      const re = new Float32Array(N), im = new Float32Array(N);
+      for (let n = 1; n < N; n++) re[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * duty);
+      w = this.ctx!.createPeriodicWave(re, im);
+      this.pulses.set(duty, w);
+    }
+    return w;
+  }
+  private pulse(duty: number, f: number, t: number, dur: number, to: AudioNode) {
+    const o = this.ctx!.createOscillator();
+    o.setPeriodicWave(this.pulseWave(duty));
+    o.frequency.setValueAtTime(f, t);
+    o.connect(to);
+    o.start(t);
+    o.stop(t + dur + 0.03);
+    return o;
+  }
+  /** a hard-edged envelope: chip channels switch on and off */
+  private gate(g: AudioParam, t: number, v: number, dur: number) {
+    g.setValueAtTime(v, t);
+    g.setValueAtTime(v, t + dur * 0.85);
+    g.linearRampToValueAtTime(0, t + dur);
+  }
+
+  private kickC(t: number, v: number) {
+    const g = this.gain(this.drums);
+    this.gate(g.gain, t, 0.55 * v, 0.12);
+    const o = this.osc('triangle', 200, t, 0.12, g);
+    o.frequency.exponentialRampToValueAtTime(40, t + 0.1);
+  }
+  private snareC(t: number, v: number) {
+    const g = this.gain(this.drums);
+    g.gain.setValueAtTime(0.3 * v, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    this.noiseSrc(t, 0.13, this.filter('highpass', 1200, 0.5, g));
+  }
+  private hatC(t: number, v: number, open: boolean) {
+    const g = this.gain(this.drums);
+    g.gain.setValueAtTime(0.09 * v, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + (open ? 0.09 : 0.025));
+    this.noiseSrc(t, 0.1, this.filter('highpass', 8000, 0.5, g));
+  }
+  private clapC(t: number, v: number) {
+    this.snareC(t, v * 0.6);
+  }
+  private bassC(t: number, m: number, dur: number, v: number) {
+    const g = this.gain(this.music);
+    this.gate(g.gain, t, 0.3 * v, dur * 0.9);
+    this.osc('triangle', midiHz(m), t, dur, g);
+  }
+  /** chords as a 32nd-note arpeggio over the bar */
+  private padC(t: number, ms: number[], dur: number) {
+    const step = this.game!.tempo.s16At(t - this.start) / 2;
+    const n = Math.floor(dur / step);
+    for (let k = 0; k < n; k++) {
+      const g = this.gain(this.music);
+      this.gate(g.gain, t + k * step, 0.035, step);
+      this.pulse(0.25, midiHz(ms[k % ms.length]), t + k * step, step, g);
+    }
+  }
+  private arpC(t: number, m: number) {
+    const g = this.gain(this.music);
+    this.gate(g.gain, t, 0.05, 0.09);
+    this.pulse(0.5, midiHz(m + 12), t, 0.09, g);
+  }
+  private leadC(t: number, m: number, dur: number) {
+    const ctx = this.ctx!;
+    const g = this.gain(this.music);
+    this.gate(g.gain, t, 0.06, dur * 0.95);
+    g.connect(this.gain(this.delay, 0.3));
+    const o = this.pulse(0.125, midiHz(m), t, dur, g);
+    // vibrato after a moment, the way trackers did it
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 6;
+    const lg = ctx.createGain();
+    lg.gain.setValueAtTime(0, t);
+    lg.gain.setValueAtTime(0, t + Math.min(0.2, dur * 0.5));
+    lg.gain.linearRampToValueAtTime(18, t + Math.min(0.35, dur));
+    lfo.connect(lg).connect(o.detune);
+    lfo.start(t);
+    lfo.stop(t + dur + 0.05);
+  }
+  /** a coin: the note, then a fifth / an octave above */
+  private brickC(t: number, m: number, heat: number, pierce: boolean, vol: number) {
+    const g = this.gain(this.notes);
+    this.gate(g.gain, t, 0.09 * vol, 0.16 + heat * 0.02);
+    g.connect(this.gain(this.delay, 0.25));
+    const o = this.pulse(heat >= 2 ? 0.125 : 0.25, midiHz(m), t, 0.18, g);
+    o.frequency.setValueAtTime(midiHz(m + (heat >= 3 || pierce ? 12 : 7)), t + 0.05);
+  }
+  private bellsC(t: number, m: number) {
+    const g = this.gain(this.notes);
+    this.gate(g.gain, t, 0.03, 0.06);
+    this.pulse(0.125, midiHz(m), t, 0.06, g);
+  }
+
+  // ------------------------------------------------------------ techno kit
+  // A long, driven kick with a rumble, metallic hats from detuned squares, a 303-style acid bass
+  // (a resonant filter snapping open on each note), dub chord stabs drowning in echo.
+  private shaper: WaveShaperNode | null = null;
+  private drive() {
+    if (!this.shaper) {
+      const n = 1024, c = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2 - 1;
+        c[i] = Math.tanh(x * 3);
+      }
+      this.shaper = this.ctx!.createWaveShaper();
+      this.shaper.curve = c;
+      this.shaper.connect(this.drums);
+    }
+    return this.shaper;
+  }
+  private kickT(t: number, v: number) {
+    const g = this.gain(this.drive());
+    this.env(g.gain, t, 0.6 * v, 0.002, 0.55);
+    const o = this.osc('sine', 170, t, 0.6, g);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.09);
+    // rumble: the kick through a dark reverb
+    g.connect(this.gain(this.filter('lowpass', 180, 0.7, this.verb), 0.45));
+  }
+  private snareT(t: number, v: number) {
+    this.clap(t, v);
+  }
+  private metal(t: number, dur: number, v: number, to: AudioNode) {
+    const g = this.gain(to);
+    this.env(g.gain, t, v, 0.001, dur);
+    const hp = this.filter('highpass', 7000, 0.7, g);
+    for (const r of [2, 3, 4.16, 5.43, 6.79, 8.21]) this.osc('square', 40 * r * 2, t, dur + 0.05, hp);
+  }
+  private hatT(t: number, v: number, open: boolean) {
+    this.metal(t, open ? 0.22 : 0.04, (open ? 0.05 : 0.035) * v, this.drums);
+  }
+  private clapT(t: number, v: number) {
+    if (v > 0.4) this.clap(t, v * 0.8);
+    else this.metal(t, 0.03, 0.03, this.drums);
+  }
+  /** acid: saw → screaming low-pass, accent on the octave notes */
+  private bassT(t: number, m: number, dur: number, v: number) {
+    const acc = m % 12 === (this.song!.root + 12) % 12 && v > 0.9;
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.16, t + 0.004);
+    p.setValueAtTime(0.16, t + dur * 0.8);
+    p.exponentialRampToValueAtTime(0.0001, t + dur * 1.1);
+    const lp = this.filter('lowpass', 300, 14, g);
+    const bar = this.game!.tempo.stepAt(t - this.start) / 16;
+    const open = 700 + 1600 * (0.5 + 0.5 * Math.sin(bar * 0.9)) + (acc ? 1200 : 0);
+    lp.frequency.setValueAtTime(open, t);
+    lp.frequency.exponentialRampToValueAtTime(220, t + dur * 0.9);
+    this.osc('sawtooth', midiHz(m + 12), t, dur * 1.1, lp);
+  }
+  /** a dub stab: short filtered chord, long echo */
+  private padT(t: number, ms: number[], dur: number) {
+    const s16 = this.game!.tempo.s16At(t - this.start);
+    for (const at of [t + s16 * 2, t + s16 * 10]) {
+      const g = this.gain(this.music);
+      this.env(g.gain, at, 0.05, 0.004, 0.18);
+      g.connect(this.gain(this.delay, 1.1));
+      g.connect(this.gain(this.verb, 0.5));
+      const bp = this.filter('bandpass', 900, 1.2, g);
+      for (const m of ms) this.osc('sawtooth', midiHz(m), at, 0.25, bp);
+    }
+    void dur;
+  }
+  private arpT(t: number, m: number) {
+    const g = this.gain(this.music);
+    this.env(g.gain, t, 0.05, 0.002, 0.12);
+    g.connect(this.gain(this.delay, 0.6));
+    const f = midiHz(m);
+    const car = this.osc('sine', f, t, 0.15, g);
+    const mg = this.ctx!.createGain();
+    mg.connect(car.frequency);
+    mg.gain.setValueAtTime(f * 3, t);
+    mg.gain.exponentialRampToValueAtTime(1, t + 0.1);
+    this.osc('sine', f * 1.41, t, 0.15, mg);
+  }
+  private leadT(t: number, m: number, dur: number) {
+    const g = this.gain(this.music);
+    this.env(g.gain, t, 0.05, 0.01, dur + 0.1);
+    g.connect(this.gain(this.delay, 0.8));
+    const lp = this.filter('lowpass', 600, 10, g);
+    lp.frequency.setValueAtTime(600, t);
+    lp.frequency.exponentialRampToValueAtTime(3000, t + dur * 0.6);
+    this.osc('sawtooth', midiHz(m), t, dur + 0.15, lp);
+  }
+  /** a metallic FM hit */
+  private brickT(t: number, m: number, heat: number, pierce: boolean, vol: number) {
+    const g = this.gain(this.notes);
+    this.env(g.gain, t, 0.14 * vol, 0.002, 0.3 + heat * 0.05);
+    g.connect(this.gain(this.delay, 0.55));
+    const f = midiHz(m);
+    const car = this.osc('sine', f, t, 0.5, g);
+    const mg = this.ctx!.createGain();
+    mg.gain.setValueAtTime(f * (2 + heat), t);
+    mg.gain.exponentialRampToValueAtTime(1, t + 0.25);
+    mg.connect(car.frequency);
+    this.osc('sine', f * 1.41, t, 0.5, mg);
+    if (pierce) this.metal(t, 0.1, 0.04, this.notes);
+  }
+
+  // ------------------------------------------------------------ funk / disco kit
+  // A tight kick and snare, disco hats, a slap bass (thumb and popped octaves), a wah clavinet,
+  // brass stabs, vibraphone bricks.
+  private kickF(t: number, v: number) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.8 * v, 0.002, 0.26);
+    const o = this.osc('sine', 130, t, 0.3, g);
+    o.frequency.exponentialRampToValueAtTime(52, t + 0.07);
+  }
+  private snareF(t: number, v: number) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.36 * v, 0.001, 0.14);
+    g.connect(this.gain(this.verb, 0.35));
+    this.noiseSrc(t, 0.16, this.filter('bandpass', 3000, 0.8, g));
+    const tg = this.gain(this.drums);
+    this.env(tg.gain, t, 0.25 * v, 0.001, 0.06);
+    this.osc('triangle', 230, t, 0.07, tg);
+  }
+  private hatF(t: number, v: number, open: boolean) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, (open ? 0.14 : 0.08) * v, 0.001, open ? 0.25 : 0.03);
+    this.noiseSrc(t, 0.3, this.filter('highpass', open ? 8000 : 9500, 0.6, g));
+  }
+  /** slap: a bright thumb attack; popped octaves snap harder */
+  private bassF(t: number, m: number, dur: number, v: number) {
+    const pop = m >= this.song!.root + 12;
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.3 * v, t + 0.003);
+    p.exponentialRampToValueAtTime(0.12 * v, t + 0.08);
+    p.exponentialRampToValueAtTime(0.0001, t + Math.max(0.15, dur * 1.2));
+    const lp = this.filter('lowpass', 400, 4, g);
+    lp.frequency.setValueAtTime(pop ? 4000 : 2400, t);
+    lp.frequency.exponentialRampToValueAtTime(380, t + 0.09);
+    const f = midiHz(m);
+    this.osc('sawtooth', f, t, dur * 1.3, lp);
+    this.osc('square', f, t, dur * 1.3, this.gain(lp, 0.4));
+  }
+  /** brass stabs on the downbeat and the "and" of 2 */
+  private padF(t: number, ms: number[], dur: number) {
+    const s16 = this.game!.tempo.s16At(t - this.start);
+    for (const at of [t, t + s16 * 6]) {
+      const g = this.gain(this.music);
+      const p = g.gain;
+      p.setValueAtTime(0.0001, at);
+      p.linearRampToValueAtTime(0.05, at + 0.03);
+      p.exponentialRampToValueAtTime(0.0001, at + 0.3);
+      g.connect(this.gain(this.verb, 0.4));
+      const lp = this.filter('lowpass', 500, 1.5, g);
+      lp.frequency.setValueAtTime(500, at);
+      lp.frequency.exponentialRampToValueAtTime(2800, at + 0.05);
+      lp.frequency.exponentialRampToValueAtTime(900, at + 0.25);
+      for (const m of ms) {
+        this.osc('sawtooth', midiHz(m), at, 0.32, lp, -6);
+        this.osc('sawtooth', midiHz(m), at, 0.32, lp, 6);
+      }
+    }
+    void dur;
+  }
+  /** clavinet through an auto-wah */
+  private arpF(t: number, m: number) {
+    const g = this.gain(this.music);
+    this.env(g.gain, t, 0.07, 0.002, 0.13);
+    const bp = this.filter('bandpass', 700, 5, g);
+    bp.frequency.setValueAtTime(600, t);
+    bp.frequency.exponentialRampToValueAtTime(2200, t + 0.07);
+    this.pulse(0.2, midiHz(m), t, 0.16, bp);
+  }
+  /** a synth-brass lead with a slow swell */
+  private leadF(t: number, m: number, dur: number) {
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.06, t + 0.05);
+    p.setValueAtTime(0.06, t + Math.max(0.06, dur - 0.04));
+    p.exponentialRampToValueAtTime(0.0001, t + dur + 0.12);
+    g.connect(this.gain(this.verb, 0.5));
+    const lp = this.filter('lowpass', 900, 2, g);
+    lp.frequency.setValueAtTime(900, t);
+    lp.frequency.linearRampToValueAtTime(2600, t + Math.min(0.3, dur));
+    this.osc('sawtooth', midiHz(m), t, dur + 0.15, lp, -5);
+    this.osc('sawtooth', midiHz(m), t, dur + 0.15, lp, 5);
+  }
+  /** vibraphone: sine plus a bright decaying partial, a little tremolo */
+  private brickF(t: number, m: number, heat: number, pierce: boolean, vol: number) {
+    const g = this.gain(this.notes);
+    this.env(g.gain, t, 0.16 * vol, 0.002, 0.9 + heat * 0.1);
+    g.connect(this.gain(this.verb, 0.45));
+    const f = midiHz(m);
+    this.osc('sine', f, t, 1.1, g);
+    const bg = this.gain(g);
+    this.env(bg.gain, t, 0.4, 0.001, 0.2);
+    this.osc('sine', f * 4, t, 0.25, bg);
+    if (heat >= 3 || pierce) this.osc('sine', f * 2, t, 0.8, this.gain(g, 0.3));
+  }
+  /** strings for the bells layer: a quick swell */
+  private bellsF(t: number, m: number) {
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.025, t + 0.12);
+    p.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    g.connect(this.gain(this.verb, 0.7));
+    const lp = this.filter('lowpass', 3000, 0.7, g);
+    this.osc('sawtooth', midiHz(m), t, 0.65, lp, -8);
+    this.osc('sawtooth', midiHz(m), t, 0.65, lp, 8);
+  }
+
+  // ------------------------------------------------------------ drum & bass kit
+  // A punchy breakbeat with ghost snares, a big roomy snare, a reese bass (detuned saws and a
+  // sub), wide atmospheric pads, glassy plucks.
+  private kickD(t: number, v: number) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.9 * v, 0.001, 0.22);
+    const o = this.osc('sine', 160, t, 0.25, g);
+    o.frequency.exponentialRampToValueAtTime(48, t + 0.06);
+    const c = this.gain(this.drums);
+    this.env(c.gain, t, 0.3 * v, 0.001, 0.01);
+    this.noiseSrc(t, 0.02, this.filter('highpass', 3000, 0.7, c));
+  }
+  private snareD(t: number, v: number) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.5 * v, 0.001, 0.22);
+    g.connect(this.gain(this.verb, 0.7 * v));
+    this.noiseSrc(t, 0.25, this.filter('bandpass', 2200, 0.6, g));
+    const tg = this.gain(this.drums);
+    this.env(tg.gain, t, 0.35 * v, 0.001, 0.09);
+    const o = this.osc('triangle', 210, t, 0.1, tg);
+    o.frequency.exponentialRampToValueAtTime(170, t + 0.08);
+  }
+  private hatD(t: number, v: number, open: boolean) {
+    const g = this.gain(this.drums);
+    this.env(g.gain, t, 0.09 * v, 0.001, open ? 0.12 : 0.02);
+    this.noiseSrc(t, 0.15, this.filter('highpass', 9000, 0.6, g));
+  }
+  /** ghost snares */
+  private clapD(t: number, v: number) {
+    this.snareD(t, v > 0.4 ? 0.3 : 0.15);
+  }
+  /** reese: two detuned saws, a slow low-pass wobble, a sine sub */
+  private bassD(t: number, m: number, dur: number, v: number) {
+    const ctx = this.ctx!;
+    const len = Math.max(dur * 3.5, 0.4);
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.2 * v, t + 0.02);
+    p.setValueAtTime(0.2 * v, t + len * 0.8);
+    p.exponentialRampToValueAtTime(0.0001, t + len);
+    const lp = this.filter('lowpass', 420, 3, g);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 1.6;
+    const lg = ctx.createGain();
+    lg.gain.value = 220;
+    lfo.connect(lg).connect(lp.frequency);
+    lfo.start(t);
+    lfo.stop(t + len + 0.05);
+    const f = midiHz(m);
+    this.osc('sawtooth', f, t, len, lp, -14);
+    this.osc('sawtooth', f, t, len, lp, 14);
+    this.osc('sine', f / 2, t, len, this.gain(g, 0.9));
+  }
+  private padD(t: number, ms: number[], dur: number) {
+    const g = this.gain(this.music);
+    const p = g.gain;
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(0.035, t + 0.6);
+    p.setValueAtTime(0.035, t + dur * 0.8);
+    p.linearRampToValueAtTime(0.0001, t + dur + 0.8);
+    g.connect(this.gain(this.verb, 1.2));
+    const lp = this.filter('lowpass', 1100, 0.8, g);
+    for (const m of ms) {
+      this.osc('sawtooth', midiHz(m + 12), t, dur + 0.8, lp, -10);
+      this.osc('triangle', midiHz(m + 12), t, dur + 0.8, lp, 10);
+    }
+  }
+  private arpD(t: number, m: number) {
+    this.bell(t, m + 12, 0.04);
+  }
+  private leadD(t: number, m: number, dur: number) {
+    const g = this.gain(this.music);
+    this.env(g.gain, t, 0.05, 0.03, dur + 0.2);
+    g.connect(this.gain(this.delay, 0.6));
+    g.connect(this.gain(this.verb, 0.6));
+    this.osc('triangle', midiHz(m), t, dur + 0.25, this.filter('lowpass', 2500, 1, g));
+  }
+  /** glassy pluck */
+  private brickD(t: number, m: number, heat: number, pierce: boolean, vol: number) {
+    const g = this.gain(this.notes);
+    this.env(g.gain, t, 0.15 * vol, 0.002, 0.45 + heat * 0.05);
+    g.connect(this.gain(this.delay, 0.5));
+    g.connect(this.gain(this.verb, 0.4));
+    const f = midiHz(m);
+    this.osc('triangle', f, t, 0.6, g);
+    const bg = this.gain(g);
+    this.env(bg.gain, t, 0.5, 0.001, 0.12);
+    this.osc('sine', f * 5, t, 0.15, bg);
+    if (heat >= 3 || pierce) this.bell(t, m + 12, 0.05);
   }
 
   // ------------------------------------------------------------ calibration
