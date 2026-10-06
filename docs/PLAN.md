@@ -15,6 +15,7 @@
 | Utrata piłki | **Życia + muzyka cichnie.** Kilka żyć na utwór. Spadek piłki: mnożnik się zeruje, jedna warstwa muzyki gaśnie, piłka wraca na paletkę. Utrata wszystkich żyć kończy poziom z wynikiem, ale bez zaliczenia. |
 | Trafienie w rytm | **Piłka w rytmie + uderzenie.** Gra delikatnie dopasowuje prędkość piłki, żeby spadała na paletkę na bit, więc całość „tańczy” z muzyką. Gracz może dodatkowo **uderzyć** (szybki ruch palca w górę, spacja, klik). Uderzenie w momencie kontaktu = trafienie w rytm: mnożnik, piłka się rozgrzewa. Samo złapanie też odbija piłkę, ale bez bonusu. |
 | Zakres przed testem | **M0–M1, potem STOP.** Czucie odbijania i rytmu z prostą grafiką i jednym utworem. Efekty wow i 5 utworów dopiero po teście właściciela na telefonie. |
+| Po obejrzeniu M2 (2026-10-06) | Piłka i trafienie „idealnie” świeciły za mocno (piłka ginęła w kuli światła): przygaszone. Podłoże nie może falować. Dalej M3. |
 | Po teście M1 (2026-10-06) | Uderzenie ruchem palca w górę zostaje (wygodniejsze niż stuknięcie). Pierścień lądowania za bardzo ułatwia: domyślnie wyłączony. Prędkość piłki to wybór gracza w menu: średnia albo szybka, szybka daje +25% punktów. M1 odebrane, dalej M2. |
 | Język | Tekst dla gracza po polsku. Kod, komentarze i nazwy w kodzie po angielsku. Commity po polsku. |
 
@@ -205,7 +206,7 @@ Repo, Vite + TS, WebGL2 z pustą sceną, PWA, ikony, workflow Pages, `CLAUDE.md`
 **STOP: test właściciela.**
 
 ### M2: Efekt wow (zrobione 2026-10-06, czeka na ocenę właściciela)
-Tło rośnie z warstwami: hi-hat → gwiazdy migają, werbel → błyski nieba, pad → zorza, arpeggio → wachlarz laserów zza gór, bas w szesnastkach → falująca siatka, perkusjonalia → korektor widma na horyzoncie.
+Tło rośnie z warstwami: hi-hat → gwiazdy migają, werbel → błyski nieba, pad → zorza, arpeggio → wachlarz laserów zza gór, bas w szesnastkach → linie podłogi jaśnieją z basem (podłoga nigdy się nie rusza poza przewijaniem, falowanie przyprawiało o chorobę morską), perkusjonalia → korektor widma na horyzoncie.
 Tło synthwave reagujące na muzykę, szklane klocki i odłamki, ślad piłki, fale uderzeniowe w composite, aberracja, zamrożenie klatki, oddychająca kamera, obniżanie jakości.
 **Odbiór:** zrzuty w pionie i poziomie, 60 fps w emulacji średniego telefonu, brak NaN.
 

@@ -28,7 +28,8 @@ void main(){
 // a perspective grid rolling towards us. It reacts to the music (kick, snare, hats, spectrum)
 // and grows with the layers the player unlocks:
 //   hat → stars twinkle, snare → the sky flashes, pad → aurora ribbons, arp → laser fan from the
-//   horizon (one beam per 16th), bass2 → the floor waves, perc → a spectrum skyline on the horizon.
+//   horizon (one beam per 16th), bass2 → the floor lines glow with the bass (they never move:
+//   the owner found a waving floor nauseating), perc → a spectrum skyline on the horizon.
 export const BG_FS = `${H}
 ${SAFE}
 ${NOISE}
@@ -145,11 +146,10 @@ void main(){
     c = mix(c, vec3(.012, .003, .025), in2);
     c += cyan * exp(-abs(p.y - m2) * 600.) * (.2 + .4 * u_bass) * .8;
   } else {
-    // floor: a grid in perspective rolling towards us on the beat; bass2 makes it wave
+    // floor: a grid in perspective rolling towards us on the beat (its shape stays still)
     float dy = hz - p.y;
     float z = .32 / (dy + .01);
-    float wave = u_layB.x * .35 * sin(z * .9 - u_scroll * 6.2832) * (.5 + .7 * u_bass);
-    vec2 g = vec2(p.x / (dy + .01) * .55, z + u_scroll + wave);
+    vec2 g = vec2(p.x / (dy + .01) * .55, z + u_scroll);
     vec2 fw = fwidth(g);
     vec2 gd = abs(fract(g + .5) - .5) / max(fw, vec2(1e-4));
     float lx = 1. - smoothstep(.5, 1.6, gd.x);
@@ -158,7 +158,7 @@ void main(){
     float line = max(lx * smoothstep(.6, .1, fw.x), ly * fade);
     vec3 lc = mix(cyan * 1.2, vec3(1., .2, .8), clamp(u_groove * .8 + u_bass * .25, 0., 1.));
     c = mix(vec3(.01, .002, .03), violet * .05, smoothstep(0., .3, dy));
-    c += lc * line * (.35 + .9 * u_kick + .6 * u_bass) * smoothstep(0., .04, dy);
+    c += lc * line * (.35 + .9 * u_kick + .6 * u_bass + u_layB.x * .7 * u_bass) * smoothstep(0., .04, dy);
     // the sun's reflection on the floor
     c += sunHot * exp(-abs(p.x) * 7.) * exp(-dy * 7.) * (.12 + .2 * u_kick) * (.6 + u_energy);
     // the horizon glows

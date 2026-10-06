@@ -200,16 +200,16 @@ export class Renderer {
       }
       case 'judge': {
         const perfect = e.judge === 'perfect';
-        const c: RGB = perfect ? [1.6, 1.4, 2.2] : [0.6, 1.3, 1.6];
-        this.rings.push({ x: e.x, y: e.y, t0: t, dur: 0.45, r0: 10, r1: perfect ? 220 : 130, c, thick: perfect ? 5 : 3, a: 1 });
-        if (perfect) this.rings.push({ x: e.x, y: e.y, t0: t, dur: 0.7, r0: 20, r1: 340, c: HEAT[Math.min(4, e.heat)], thick: 2, a: 0.6 });
-        this.shock(e.x, e.y, perfect ? 1 : 0.55);
+        const c: RGB = perfect ? [1.1, 0.95, 1.5] : [0.4, 0.85, 1.1];
+        this.rings.push({ x: e.x, y: e.y, t0: t, dur: 0.45, r0: 34, r1: perfect ? 220 : 130, c, thick: perfect ? 2.5 : 1.8, a: 0.9 });
+        if (perfect) this.rings.push({ x: e.x, y: e.y, t0: t, dur: 0.6, r0: 20, r1: 300, c: HEAT[Math.min(4, e.heat)], thick: 1.5, a: 0.35 });
+        this.shock(e.x, e.y, perfect ? 0.5 : 0.28);
         this.shake = Math.max(this.shake, perfect ? 6 : 3);
         if (perfect) {
-          this.ca = Math.max(this.ca, 0.7);
-          this.flash = Math.max(this.flash, 0.05);
+          this.ca = Math.max(this.ca, 0.45);
+          this.flash = Math.max(this.flash, 0.025);
         }
-        this.sparkBurst(e.x, e.y, HEAT[Math.min(4, e.heat)], perfect ? 30 : 14, perfect ? 520 : 360, true);
+        this.sparkBurst(e.x, e.y, mul(HEAT[Math.min(4, e.heat)], 0.6), perfect ? 14 : 8, perfect ? 420 : 320, true);
         break;
       }
       case 'contact':
@@ -390,7 +390,7 @@ export class Renderer {
     for (const r of this.rings) {
       const k = clamp((t - r.t0) / r.dur, 0, 1);
       const rad = lerp(r.r0, r.r1, 1 - (1 - k) * (1 - k));
-      this.box(r.x, r.y, rad, rad, rad, 2, 8, r.thick * (1 - k * 0.5), r.c, r.a * (1 - k), 0, 1);
+      this.box(r.x, r.y, rad, rad, rad, 2, 5, r.thick * (1 - k * 0.5), r.c, r.a * (1 - k), 0, 1);
     }
 
     // paddle: glass bar with a neon edge, flares on a swing
@@ -398,11 +398,11 @@ export class Renderer {
     const lift = g.lift();
     const swingK = clamp(lift / P.swingLift, 0, 1);
     const pc: RGB = g.groove ? [1.5, 0.45, 1.5] : [0.3, 1.1, 1.5];
-    const pk = 1 + swingK * 1.4 + beat.kick * 0.25;
+    const pk = 1 + swingK * 0.5 + beat.kick * 0.2;
     const py = P.y + lift;
-    this.box(g.px, py, P.w / 2, P.h / 2, P.h / 2, 1, 16, 0, mul(pc, pk), 1);
-    this.box(g.px, py + P.h * 0.18, P.w / 2 - 10, 2, 2, 0, 6, 0, mul([1.4, 1.4, 1.6], 0.8 + swingK), 0.9, 0, 1);
-    if (swingK > 0.05) this.box(g.px, py - P.h, P.w / 2 * (0.6 + swingK * 0.4), 4, 4, 0, 18, 0, mul(pc, swingK * 1.5), 1, 0, 1);
+    this.box(g.px, py, P.w / 2, P.h / 2, P.h / 2, 1, 9, 0, mul(pc, pk), 1);
+    this.box(g.px, py + P.h * 0.18, P.w / 2 - 10, 2, 2, 0, 4, 0, mul([1.2, 1.2, 1.4], 0.7 + swingK * 0.4), 0.9, 0, 1);
+    if (swingK > 0.05) this.box(g.px, py - P.h * 0.8, P.w / 2 * (0.6 + swingK * 0.4), 2, 2, 0, 6, 0, mul(pc, swingK * 0.7), 1, 0, 1);
 
     // the landing ring (test option, off by default)
     const L = g.landing;
@@ -428,19 +428,20 @@ export class Renderer {
         const dx = p.x - a.x, dy = p.y - a.y, len = Math.hypot(dx, dy);
         if (len < 0.01 || len > 200) continue;
         const tc = HEAT[Math.min(HEAT.length - 1, p.heat)];
-        const w = R * (0.15 + 0.75 * k * k);
-        this.box((a.x + p.x) / 2, (a.y + p.y) / 2, len / 2 + w, w, w, 0, 5 + p.heat * 2, 0, mul(tc, 0.5 + 0.6 * k), k * 0.8, Math.atan2(dy, dx), 1);
+        const w = R * (0.1 + 0.45 * k * k);
+        this.box((a.x + p.x) / 2, (a.y + p.y) / 2, len / 2 + w, w, w, 0, 3 + p.heat, 0, mul(tc, 0.25 + 0.35 * k), k * 0.7, Math.atan2(dy, dx), 1);
       }
       const hc = HEAT[Math.min(HEAT.length - 1, g.heat)];
       const pierce = g.heat >= BAL.heat.pierce;
-      this.box(g.bx, g.by, R, R, R, 0, 12 + g.heat * 4, 0, mul(hc, 1.4), 1);
-      this.box(g.bx, g.by, R * 0.55, R * 0.55, R * 0.55, 0, 0, 0, [2.6, 2.6, 2.6], 1);
+      // a crisp ball first: the halo stays small so it never turns into a comet
+      this.box(g.bx, g.by, R, R, R, 0, 6 + g.heat * 1.5, 0, mul(hc, 0.85), 1);
+      this.box(g.bx, g.by, R * 0.6, R * 0.6, R * 0.6, 0, 0, 0, [1.6, 1.6, 1.6], 1);
       if (pierce) {
         const pr = R * (1.7 + 0.2 * Math.sin(this.time * 30));
-        this.box(g.bx, g.by, pr, pr, pr, 2, 10, 1.5, mul(hc, 1.2), 0.8, 0, 1);
+        this.box(g.bx, g.by, pr, pr, pr, 2, 5, 1.2, mul(hc, 0.8), 0.5, 0, 1);
       }
       // a hot ball sheds sparks
-      if (g.heat >= 2 && !g.onPaddle && this.r() < (g.heat - 1) * 0.35 * this.quality * Math.min(1, rdt * 60)) {
+      if (g.heat >= 3 && !g.onPaddle && this.r() < (g.heat - 2) * 0.2 * this.quality * Math.min(1, rdt * 60)) {
         this.addSpark({ x: g.bx, y: g.by, vx: (this.r() - 0.5) * 120 - g.dx * 60, vy: (this.r() - 0.5) * 120 - g.dy * 60, life: 0, max: 0.3 + this.r() * 0.3, w: 1.5, c: hc, g: 200 });
       }
     }
@@ -491,7 +492,7 @@ export class Renderer {
       const k = 1 - p.life / p.max;
       const sp = Math.hypot(p.vx, p.vy);
       const len = Math.max(p.w, sp * 0.02);
-      this.box(p.x, p.y, len + p.w, p.w, p.w, 0, 3, 0, mul(p.c, 1.8), k, Math.atan2(p.vy, p.vx), 1);
+      this.box(p.x, p.y, len + p.w, p.w, p.w, 0, 3, 0, mul(p.c, 1.4), k, Math.atan2(p.vy, p.vx), 1);
       ps[w++] = p;
     }
     ps.length = w;
@@ -548,7 +549,10 @@ export class Renderer {
         continue;
       }
       const k = (this.time - s.t0) / s.dur;
-      p.f4(`u_shock[${i}]`, this.x0 + s.x * this.s, this.y0 + s.y * this.s, s.speed * (this.time - s.t0) * this.s, s.amp * (1 - k) * (1 - k));
+      // born as a ring already: a shock at radius 0 is a lens that blows up whatever glows there
+      const age = this.time - s.t0;
+      const grow = Math.min(1, age / 0.08);
+      p.f4(`u_shock[${i}]`, this.x0 + s.x * this.s, this.y0 + s.y * this.s, (40 + s.speed * age) * this.s, s.amp * (1 - k) * (1 - k) * grow);
     }
     this.fullscreen();
   }
